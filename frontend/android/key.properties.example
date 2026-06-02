@@ -1,0 +1,7 @@
+# Copy this file to android/key.properties and replace values with your keystore details.
+# Do NOT commit android/key.properties to git.
+
+storePassword=<your-key-store-password>
+keyPassword=<your-key-password>
+keyAlias=<your-key-alias>
+storeFile=<path-to-your-keystore-file>

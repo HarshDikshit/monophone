@@ -1,0 +1,84 @@
+# Root .gitignore for Minimalist Launcher
+# Keep documentation and project markdown files in source control.
+
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub/
+.pub-cache/
+build/
+**/build/
+*.log
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# Android
+**/local.properties
+**/key.properties
+**/.gradle/
+**/captures/
+**/.cxx/
+*.keystore
+*.jks
+*.iml
+
+# iOS / macOS
+**/Pods/
+**/Runner.xcworkspace/
+**/*.xcworkspace
+**/*.xcuserdata
+**/*.hmap
+**/*.ipa
+**/*.dSYM
+**/GeneratedPluginRegistrant.*
+**/Flutter/ephemeral/
+**/Flutter/Flutter.framework/
+**/Flutter/Flutter.podspec
+
+# Windows / Linux
+windows/flutter/ephemeral/
+linux/flutter/ephemeral/
+
+# Web
+web/.dart_tool/
+
+# Backend
+backend/node_modules/
+backend/.env
+backend/.env.*
+backend/npm-debug.log*
+backend/yarn-debug.log*
+backend/pnpm-debug.log*
+backend/lerna-debug.log*
+backend/logs/
+backend/*.log
+backend/dist/
+backend/out/
+backend/.idea/
+backend/.vscode/
+backend/tmp/
+backend/temp/
+backend/.cache/
+backend/coverage/
+backend/.DS_Store
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Environment examples and docs should stay tracked
+!backend/.env.example
+!frontend/.env.example
+
+# Project docs
+OTA_UPDATE_SETUP.md
+PRODUCTION_DEPLOYMENT_GUIDE.md
+PRODUCTION_LAUNCH_CHECKLIST.md
+PRODUCTION_MAINTENANCE.md

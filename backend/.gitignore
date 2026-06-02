@@ -1,0 +1,158 @@
+# Backend .gitignore for Node.js/Express Application
+
+# Environment Variables
+.env
+.env.local
+.env.*.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Dependencies
+node_modules/
+npm-debug.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Runtime Data
+.pem
+*.pem
+*.key
+*.crt
+*.cer
+*.p7b
+*.p12
+*.pfx
+
+# Lock Files (Optional - include if you want consistent versions)
+# package-lock.json
+# yarn.lock
+# pnpm-lock.yaml
+
+# Process Management
+ecosystem.config.js
+.pm2/
+
+# IDE & Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.sublime-project
+*.sublime-workspace
+.atom/
+.Rhistory
+.RData
+.Ruserdata
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+mongodb/
+mongodata/
+
+# Logs
+logs/
+*.log
+log.log
+
+# Cache
+.cache/
+.eslintcache
+.stylelintcache
+
+# Build & Distribution
+dist/
+build/
+out/
+
+# Testing
+coverage/
+.nyc_output/
+.mocha.json
+test-results/
+junit.xml
+
+# Temporary Files
+tmp/
+temp/
+*.tmp
+*.bak
+
+# OS Files
+Thumbs.db
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# OS X Specific
+.DocumentRevisions-V100
+.fseventsd
+.TemporaryItems
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# Debugging
+debug.log
+*.heapdump
+
+# SSL Certificates & Keys (CRITICAL - NEVER COMMIT)
+*.pem
+*.crt
+*.key
+*.pfx
+*.p12
+certs/
+certificates/
+
+# API Keys & Secrets
+.api-keys
+.secrets
+secrets.json
+
+# User Uploads (if applicable)
+uploads/
+user-data/
+public/uploads/
+
+# Node Version Management
+.nvmrc
+.nvm/
+
+# Yarn Specific
+.yarn/*
+!.yarn/releases
+!.yarn/plugins
+!.yarn/sdks
+!.yarn/versions
+
+# Misc
+*.orig
+*.rej
+.fusebox/
+.dynamodb/
+.env.json
+
+# Docker
+.dockerignore
+docker-compose.override.yml
+
+# Production Build Artifacts
+dist/
+build/
+*.tgz
+*.tar.gz
+
+# Backup Files
+*.backup
+*.bk
+backup/
