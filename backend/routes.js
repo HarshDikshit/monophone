@@ -819,7 +819,8 @@ router.get("/version", (req, res) => {
       downloadUrl: `${OTA_DOWNLOAD_URL}/v${LATEST_VERSION}/app-arm64-v8a-release.apk`,
       releaseNotes: RELEASE_NOTES,
       minSupportedVersion: MIN_SUPPORTED_VERSION,
-    });
+    };
+    res.json(versionInfo);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

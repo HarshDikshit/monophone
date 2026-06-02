@@ -1,5 +1,5 @@
-const dns = require('dns');
-dns.setServers(['8.8.8.8', '8.8.4.4']);
+const dns = require("dns");
+dns.setServers(["8.8.8.8", "8.8.4.4"]);
 
 require("dotenv").config();
 const express = require("express");
@@ -11,6 +11,7 @@ const mongoose = require("mongoose");
 const routes = require("./routes");
 
 const app = express();
+const HOST = process.env.HOST || "127.0.0.1";
 const PORT = process.env.PORT || 5000;
 const MONGODB_URI =
   process.env.MONGODB_URI || "mongodb://localhost:27017/minimalist-launcher";
@@ -147,8 +148,8 @@ mongoose
     // Run the check every 60 seconds
     setInterval(checkWeeklyReset, 60000);
 
-    app.listen(PORT, () => {
-      console.log(`Server is running on port ${PORT}`);
+    app.listen(PORT, HOST, () => {
+      console.log(`Server is running on ${HOST}:${PORT}`);
     });
   })
   .catch((err) => {
@@ -166,9 +167,9 @@ mongoose
     // or just let it crash. Actually starting the server on a fallback mock database/in-memory setup is extremely nice for verification!
     // But let's keep it standard and prompt the user to start MongoDB if it fails.
     // To be developer-friendly, let's start the server anyway with a warning so they can see logs.
-    app.listen(PORT, () => {
+    app.listen(PORT, HOST, () => {
       console.warn(
-        `[WARNING] Server started on port ${PORT} WITHOUT database connectivity.`,
+        `[WARNING] Server started on ${HOST}:${PORT} WITHOUT database connectivity.`,
       );
     });
   });
