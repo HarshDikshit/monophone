@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -6,7 +7,7 @@ class ApiService {
   // The production API URL is injected at build time.
   static const String baseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://192.168.1.6:5000/api',
+    defaultValue: 'https://monophone.onrender.com/api',
   );
   static const String appEnv = String.fromEnvironment(
     'APP_ENV',
@@ -188,6 +189,53 @@ class ApiService {
     );
   }
 
+  // New: Batch sync on timer events (start, pause, stop)
+  static Future<Map<String, dynamic>> batchSyncActivity(
+    Map<String, dynamic> payload,
+  ) async {
+    final token = await getToken();
+    final response = await http.post(
+      Uri.parse('$baseUrl/activity/batch-sync'),
+      headers: _headers(token),
+      body: jsonEncode(payload),
+    );
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body);
+    }
+    throw Exception(
+      jsonDecode(response.body)['message'] ?? 'Failed to batch sync',
+    );
+  }
+
+  // New: Get comprehensive analytics for the dashboard
+  static Future<Map<String, dynamic>> getAnalytics({int daysBack = 30}) async {
+    final token = await getToken();
+    final response = await http.get(
+      Uri.parse('$baseUrl/analytics?days=$daysBack'),
+      headers: _headers(token),
+    );
+    if (response.statusCode == 200) {
+      try {
+        return jsonDecode(response.body);
+      } catch (_) {
+        throw Exception(
+          'Server returned invalid data. Please try again later.',
+        );
+      }
+    }
+    // Try to extract error message from JSON, fall back to status code + body preview
+    try {
+      final body = jsonDecode(response.body);
+      throw Exception(
+        body['message'] ?? 'Failed to load analytics (${response.statusCode})',
+      );
+    } catch (_) {
+      throw Exception(
+        'Server error (${response.statusCode}). The analytics endpoint may be unavailable.',
+      );
+    }
+  }
+
   // Buddies: Add
   static Future<Map<String, dynamic>> addBuddy(String buddyEmail) async {
     final token = await getToken();
@@ -302,7 +350,7 @@ class ApiService {
     return jsonDecode(response.body);
   }
 
-  // Rankings: Category-based Skip/Limit paginated
+  // Rankings
   static Future<Map<String, dynamic>> getRankings({
     String category = 'overall',
     int skip = 0,
@@ -321,7 +369,7 @@ class ApiService {
     );
   }
 
-  // AI Motivator Headline
+  // AI Motivator
   static Future<String> getAIBehaviorGuide(
     int studySeconds,
     int distractedSeconds,
@@ -342,7 +390,6 @@ class ApiService {
         return jsonDecode(response.body)['message'] ?? '';
       }
     } catch (_) {
-      // Offline fallback string in case backend fails
       return 'Keep pushing. Time is passing. Will you pass too?';
     }
     return 'Guard your time. Your future depends on it.';

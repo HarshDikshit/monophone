@@ -4,16 +4,29 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'api_service.dart';
+import 'blocker_service.dart';
 
 class LauncherState extends ChangeNotifier {
   static const _channel = MethodChannel('com.dixit.monophone/launcher');
+
+  // Timer mode: 'countdown' or 'countup'
+  String _timerMode = 'countdown';
+  String get timerMode => _timerMode;
+
+  // Custom duration in seconds (user-defined, default 25 min)
+  int _customDurationSeconds = 25 * 60;
+  int get customDurationSeconds => _customDurationSeconds;
+
+  // Is fullscreen mode enabled
+  bool _isFullScreen = false;
+  bool get isFullScreen => _isFullScreen;
 
   // App lists
   List<Map<String, String>> _allApps = [];
   List<Map<String, String>> get allApps => _allApps;
 
-  Set<String> _studyApps = {}; // Packages marked for Study
-  Set<String> _distractionApps = {}; // Packages marked for Distraction
+  Set<String> _studyApps = {};
+  Set<String> _distractionApps = {};
 
   Set<String> get studyApps => _studyApps;
   Set<String> get distractionApps => _distractionApps;
@@ -21,7 +34,6 @@ class LauncherState extends ChangeNotifier {
   // Stats
   int _studySeconds = 0;
   int _distractedSeconds = 0;
-  int get studySeconds => _studySeconds;
   int get distractedSeconds => _distractedSeconds;
 
   String _lastGoal = '';
@@ -30,23 +42,41 @@ class LauncherState extends ChangeNotifier {
   String _aiHeadline = 'Close distractions. Protect your attention.';
   String get aiHeadline => _aiHeadline;
 
-  // Weekly chart data (past 7 days, keyed by 'YYYY-MM-DD')
   Map<String, int> _weeklyStudyData = {};
   Map<String, int> get weeklyStudyData => _weeklyStudyData;
 
   // Pomodoro
   bool _isPomodoroActive = false;
   bool _isBreak = false;
+
+  /// COUNTDOWN: seconds remaining (counts down to 0)
+  /// COUNTUP:   seconds elapsed (counts up from 0)
   int _pomodoroSecondsRemaining = 25 * 60;
-  int _pomodoroAccountedSeconds =
-      0; // Tracks seconds already logged during a running timer
+  int _pomodoroTotalDurationSeconds = 25 * 60;
+  int _pomodoroAccountedSeconds = 0;
+  int _pomodoroPendingFocusSeconds = 0;
+  int _pomodoroPendingTaskSeconds = 0;
+  bool _pomodoroDirty = false;
   Timer? _pomodoroTimer;
 
   bool get isPomodoroActive => _isPomodoroActive;
   bool get isBreak => _isBreak;
+
+  /// Returns the displayed time value:
+  /// - countdown: remaining seconds
+  /// - countup:   elapsed seconds
   int get pomodoroSecondsRemaining => _pomodoroSecondsRemaining;
 
-  // Study Tasks State (Focus To-Do)
+  /// Returns the actual elapsed focus seconds accounting for mode
+  int get pomodoroElapsedSeconds {
+    if (!_isPomodoroActive) return 0;
+    if (_timerMode == 'countup') return _pomodoroSecondsRemaining;
+    return _pomodoroTotalDurationSeconds - _pomodoroSecondsRemaining;
+  }
+
+  int get studySeconds => _studySeconds + _pomodoroPendingFocusSeconds;
+
+  // Study Tasks State
   List<Map<String, dynamic>> _tasks = [];
   List<Map<String, dynamic>> get tasks => _tasks;
 
@@ -62,17 +92,14 @@ class LauncherState extends ChangeNotifier {
         )
       : null;
 
-  // Auth User
   Map<String, dynamic>? _userProfile;
   Map<String, dynamic>? get userProfile => _userProfile;
   bool _isLoading = false;
   bool get isLoading => _isLoading;
 
-  // Tracking launcher exit/resume
   String? _lastLaunchedPackage;
   DateTime? _exitTime;
 
-  // Settings
   bool _doubleTapLockScreen = false;
   bool get doubleTapLockScreen => _doubleTapLockScreen;
 
@@ -88,6 +115,27 @@ class LauncherState extends ChangeNotifier {
     _initMethodChannel();
   }
 
+  // ── Timer mode / duration / fullscreen setters ──
+  void setTimerMode(String mode) {
+    _timerMode = mode;
+    notifyListeners();
+  }
+
+  void setCustomDuration(int seconds) {
+    _customDurationSeconds = seconds;
+    notifyListeners();
+  }
+
+  void toggleFullScreen() {
+    _isFullScreen = !_isFullScreen;
+    notifyListeners();
+  }
+
+  void setFullScreen(bool val) {
+    _isFullScreen = val;
+    notifyListeners();
+  }
+
   void _initMethodChannel() {
     _channel.setMethodCallHandler((call) async {
       switch (call.method) {
@@ -95,6 +143,12 @@ class LauncherState extends ChangeNotifier {
           _pomodoroSecondsRemaining = call.arguments['secondsRemaining'] ?? 0;
           final bool isBreakVal = call.arguments['isBreak'] ?? false;
           _isBreak = isBreakVal;
+          // Each tick = 1 second of focus time, increment directly
+          if (_isPomodoroActive && !_isBreak) {
+            _pomodoroPendingFocusSeconds += 1;
+            _pomodoroPendingTaskSeconds += 1;
+            _pomodoroDirty = true;
+          }
           notifyListeners();
           break;
         case 'onPomodoroStateChanged':
@@ -105,30 +159,20 @@ class LauncherState extends ChangeNotifier {
           final int elapsed = call.arguments['elapsedSeconds'] ?? 0;
 
           if (status == "STOPPED") {
+            await _commitPomodoroProgress(sync: true);
             _isPomodoroActive = false;
-            final newlyElapsed = elapsed - _pomodoroAccountedSeconds;
-            if (newlyElapsed > 0) {
-              _attributeSecondsToTask(_activeTaskId, newlyElapsed);
-              _studySeconds += newlyElapsed;
-              await _saveLocalStats();
-              await _syncStatsToBackend();
-            }
             _pomodoroAccountedSeconds = 0;
+            _pomodoroTotalDurationSeconds = _customDurationSeconds;
           } else if (status == "BREAK") {
             if (!_isBreak && isBreakVal) {
+              await _commitPomodoroProgress(sync: true);
               _incrementActiveTaskPomodoro();
-              final newlyElapsed = elapsed - _pomodoroAccountedSeconds;
-              if (newlyElapsed > 0) {
-                _attributeSecondsToTask(_activeTaskId, newlyElapsed);
-                _studySeconds += newlyElapsed;
-              }
-              _pomodoroAccountedSeconds = 0; // reset for break or next cycle
-              await _saveLocalStats();
-              await _syncStatsToBackend();
             }
             _isPomodoroActive = true;
             _isBreak = isBreakVal;
             _pomodoroSecondsRemaining = seconds;
+            _pomodoroAccountedSeconds = 0;
+            _pomodoroTotalDurationSeconds = 5 * 60;
           } else {
             _isPomodoroActive = true;
             _isBreak = isBreakVal;
@@ -137,6 +181,12 @@ class LauncherState extends ChangeNotifier {
               _lastGoal = task;
             }
             _lastTaskActivityTime = DateTime.now();
+            if (!_isBreak) {
+              _pomodoroTotalDurationSeconds = _pomodoroTotalDurationSeconds > 0
+                  ? _pomodoroTotalDurationSeconds
+                  : _customDurationSeconds;
+              _accountPomodoroElapsed(elapsed);
+            }
           }
           notifyListeners();
           break;
@@ -144,26 +194,60 @@ class LauncherState extends ChangeNotifier {
           _isDefaultLauncher = call.arguments == true;
           notifyListeners();
           break;
+        case 'onBlockTriggered':
+          {
+            final args = call.arguments is Map
+                ? Map<String, dynamic>.from(call.arguments)
+                : <String, dynamic>{};
+            debugPrint(
+              "Block triggered: ${args['packageName']} — ${args['reason']}",
+            );
+            notifyListeners();
+          }
+          break;
+        case 'onEmergencyUseStarted':
+          {
+            final args = call.arguments is Map
+                ? Map<String, dynamic>.from(call.arguments)
+                : <String, dynamic>{};
+            debugPrint("Emergency use started: ${args['packageName']}");
+            notifyListeners();
+          }
+          break;
+        case 'onEmergencyUseExpired':
+          {
+            final args = call.arguments is Map
+                ? Map<String, dynamic>.from(call.arguments)
+                : <String, dynamic>{};
+            debugPrint(
+              "Emergency use expired: ${args['packageName']} — re-locking",
+            );
+            notifyListeners();
+          }
+          break;
+        case 'onEmergencyUseTick':
+          notifyListeners();
+          break;
       }
     });
   }
 
-  // Load local preferences and stats
   Future<void> _loadLocalStats() async {
     final prefs = await SharedPreferences.getInstance();
 
-    // Categorizations
     _studyApps = (prefs.getStringList('study_packages') ?? []).toSet();
     _distractionApps = (prefs.getStringList('distraction_packages') ?? [])
         .toSet();
 
-    // Stats for today (keyed by date)
     final todayStr = _todayKey();
     _studySeconds = prefs.getInt('study_seconds_$todayStr') ?? 0;
     _distractedSeconds = prefs.getInt('distracted_seconds_$todayStr') ?? 0;
     _lastGoal = prefs.getString('last_goal') ?? '';
 
-    // Load double tap settings
+    _timerMode = prefs.getString('timer_mode') ?? 'countdown';
+    _customDurationSeconds = prefs.getInt('custom_duration_seconds') ?? 25 * 60;
+    _isFullScreen = prefs.getBool('timer_fullscreen') ?? false;
+
     _doubleTapLockScreen = prefs.getBool('double_tap_lock_screen') ?? false;
     _doubleTapOpenDrawer = prefs.getBool('double_tap_open_drawer') ?? false;
 
@@ -171,7 +255,6 @@ class LauncherState extends ChangeNotifier {
     await loadWeeklyData();
     notifyListeners();
 
-    // Sync with running native Pomodoro service if any
     try {
       final Map<dynamic, dynamic>? nativeState = await _channel.invokeMethod(
         'getPomodoroState',
@@ -181,12 +264,12 @@ class LauncherState extends ChangeNotifier {
         _pomodoroSecondsRemaining = nativeState['secondsRemaining'] ?? 0;
         _isBreak = nativeState['isBreak'] ?? false;
         _lastGoal = nativeState['taskName'] ?? _lastGoal;
+        _timerMode = nativeState['timerMode'] ?? _timerMode;
       }
     } catch (_) {}
 
     await checkDefaultLauncher();
 
-    // Initial fetch of profile and AI motivator if token exists
     final token = await ApiService.getToken();
     if (token != null) {
       await fetchUserProfile();
@@ -194,12 +277,54 @@ class LauncherState extends ChangeNotifier {
     }
   }
 
+  Future<void> _saveTimerPreferences() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('timer_mode', _timerMode);
+    await prefs.setInt('custom_duration_seconds', _customDurationSeconds);
+    await prefs.setBool('timer_fullscreen', _isFullScreen);
+  }
+
   String _todayKey() {
     final now = DateTime.now();
     return '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
   }
 
-  // Save stats
+  void _accountPomodoroElapsed(int elapsedSeconds) {
+    final newlyElapsed = elapsedSeconds - _pomodoroAccountedSeconds;
+    if (newlyElapsed > 0) {
+      _pomodoroPendingFocusSeconds += newlyElapsed;
+      _pomodoroPendingTaskSeconds += newlyElapsed;
+      _pomodoroAccountedSeconds = elapsedSeconds;
+      _pomodoroDirty = true;
+      notifyListeners();
+    }
+  }
+
+  Future<void> _commitPomodoroProgress({bool sync = false}) async {
+    if (_pomodoroPendingFocusSeconds <= 0) {
+      if (sync && (await ApiService.getToken()) != null) {
+        await _syncStatsToBackend();
+      }
+      return;
+    }
+
+    _studySeconds += _pomodoroPendingFocusSeconds;
+    final taskSeconds = _pomodoroPendingTaskSeconds;
+    _pomodoroPendingFocusSeconds = 0;
+    _pomodoroPendingTaskSeconds = 0;
+    _pomodoroDirty = true;
+
+    if (_activeTaskId != null && taskSeconds > 0) {
+      _attributeSecondsToTask(_activeTaskId, taskSeconds);
+    }
+
+    await _saveLocalStats();
+    if (sync) {
+      await _syncStatsToBackend();
+    }
+    _pomodoroDirty = false;
+  }
+
   Future<void> _saveLocalStats() async {
     final prefs = await SharedPreferences.getInstance();
     final todayStr = _todayKey();
@@ -209,7 +334,6 @@ class LauncherState extends ChangeNotifier {
     await loadWeeklyData();
   }
 
-  // Set/Get apps from Native MethodChannel
   Future<void> refreshAppsList() async {
     try {
       final List<dynamic>? apps = await _channel.invokeMethod(
@@ -217,8 +341,6 @@ class LauncherState extends ChangeNotifier {
       );
       if (apps != null) {
         _allApps = apps.map((app) => Map<String, String>.from(app)).toList();
-
-        // Auto-categorise uncategorised apps as permitted/neutral if they are not distraction/study
         notifyListeners();
       }
     } on PlatformException catch (e) {
@@ -226,7 +348,6 @@ class LauncherState extends ChangeNotifier {
     }
   }
 
-  // App Categorization
   Future<void> toggleAppCategory(String packageName, String category) async {
     final prefs = await SharedPreferences.getInstance();
 
@@ -254,22 +375,17 @@ class LauncherState extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Launch App through native bridge
   Future<bool> launchApp(String packageName) async {
     try {
-      // Check if blocked by Pomodoro
       if (_isPomodoroActive &&
           !_isBreak &&
           _distractionApps.contains(packageName)) {
-        // App is blocked
         return false;
       }
 
-      // Track exit
       _lastLaunchedPackage = packageName;
       _exitTime = DateTime.now();
 
-      // Update real-time status to backend
       final appName = _allApps.firstWhere(
         (element) => element['packageName'] == packageName,
         orElse: () => {'name': 'App'},
@@ -288,12 +404,9 @@ class LauncherState extends ChangeNotifier {
     }
   }
 
-  // Lifecycle resume callback (to track study/distraction duration on return)
   Future<void> handleResume() async {
-    // Check permission
     await _channel.invokeMethod('hasUsageAccessPermission');
 
-    // Stop distraction timer service if active
     await stopDistractionTimer();
     await checkDefaultLauncher();
 
@@ -307,7 +420,6 @@ class LauncherState extends ChangeNotifier {
       } else if (_distractionApps.contains(_lastLaunchedPackage)) {
         _distractedSeconds += elapsed;
       } else {
-        // Neutral apps do not contribute to stats, or can count as study if in Pomodoro
         if (_isPomodoroActive && !_isBreak) {
           _studySeconds += elapsed;
           _attributeSecondsToTask(_activeTaskId, elapsed);
@@ -316,11 +428,9 @@ class LauncherState extends ChangeNotifier {
 
       await _saveLocalStats();
 
-      // Reset
       _lastLaunchedPackage = null;
       _exitTime = null;
 
-      // Update status back to Idle
       await ApiService.updateStatus(
         _isPomodoroActive && !_isBreak ? 'Focusing ⚡' : 'Idle',
         _isPomodoroActive && !_isBreak,
@@ -340,13 +450,12 @@ class LauncherState extends ChangeNotifier {
           _studySeconds,
           _distractedSeconds,
         );
-        await fetchUserProfile(); // Update global score
+        await fetchUserProfile();
         await updateAIHeadline();
       } catch (_) {}
     }
   }
 
-  // Set Target Goal
   Future<void> setTargetGoal(String goal) async {
     _lastGoal = goal;
     await _saveLocalStats();
@@ -359,7 +468,6 @@ class LauncherState extends ChangeNotifier {
     }
   }
 
-  // Fetch User Profile
   Future<void> fetchUserProfile() async {
     try {
       _isLoading = true;
@@ -380,7 +488,6 @@ class LauncherState extends ChangeNotifier {
     }
   }
 
-  // Update AI Headline rolling text
   Future<void> updateAIHeadline() async {
     try {
       final text = await ApiService.getAIBehaviorGuide(
@@ -444,50 +551,83 @@ class LauncherState extends ChangeNotifier {
 
     _isPomodoroActive = true;
     _isBreak = false;
-    _pomodoroSecondsRemaining = 25 * 60;
-    _pomodoroAccountedSeconds = 0;
 
-    // Enable hard lock monitor service on Android
+    // COUNTDOWN: secondsRemaining starts at duration, counts down
+    // COUNTUP:   secondsRemaining starts at 0, counts up (elapsed)
+    _pomodoroSecondsRemaining = _timerMode == 'countdown'
+        ? _customDurationSeconds
+        : 0;
+    _pomodoroTotalDurationSeconds = _customDurationSeconds;
+    _pomodoroAccountedSeconds = 0;
+    _pomodoroPendingFocusSeconds = 0;
+    _pomodoroPendingTaskSeconds = 0;
+    _pomodoroDirty = false;
+
+    final focusTubeBlockedNames = BlockerService.instance.unproductiveAppNames
+        .map((name) => name.toLowerCase().trim())
+        .toSet();
+    final focusTubePackages = _allApps
+        .where(
+          (app) => focusTubeBlockedNames.contains(
+            (app['name'] ?? '').toLowerCase().trim(),
+          ),
+        )
+        .map((app) => app['packageName'] ?? '')
+        .where((pkg) => pkg.isNotEmpty)
+        .toSet();
+
+    final blockReels = BlockerService.instance.blockReelsShorts;
+    final reelsPackages = _allApps
+        .where((app) {
+          if (!blockReels) return false;
+          final name = (app['name'] ?? '').toLowerCase().trim();
+          return name.contains('instagram') ||
+              name.contains('youtube') ||
+              name.contains('tiktok') ||
+              name.contains('facebook') ||
+              name.contains('reels') ||
+              name.contains('shorts');
+        })
+        .map((app) => app['packageName'] ?? '')
+        .where((pkg) => pkg.isNotEmpty)
+        .toSet();
+
+    final allBlockedPackages = {
+      ..._distractionApps,
+      ...focusTubePackages,
+      ...reelsPackages,
+    };
     await _channel.invokeMethod('startMonitoring', {
-      'blockedApps': _distractionApps.toList(),
+      'blockedApps': allBlockedPackages.toList(),
     });
 
-    // Start native Pomodoro service
     await _channel.invokeMethod('startPomodoro', {
       'taskName': _lastGoal.isNotEmpty ? _lastGoal : "Focus Session",
-      'durationSeconds': 25 * 60,
+      'durationSeconds': _customDurationSeconds,
       'isBreak': false,
+      'timerMode': _timerMode,
     });
 
     await ApiService.updateStatus('Focusing (Pomodoro) ⚡', true);
+
+    await _saveTimerPreferences();
+
     notifyListeners();
   }
 
   void stopPomodoro() async {
     _isPomodoroActive = false;
 
-    // Disable monitoring service
     await _channel.invokeMethod('stopMonitoring');
-    // Stop native Pomodoro service
     await _channel.invokeMethod('stopPomodoro');
 
     await ApiService.updateStatus('Idle', false);
 
-    // Sync activity with database
-    final token = await ApiService.getToken();
-    if (token != null) {
-      await ApiService.syncActivity(
-        _todayKey(),
-        _studySeconds,
-        _distractedSeconds,
-      );
-    }
-
-    await _saveLocalStats();
+    await _commitPomodoroProgress(sync: true);
     notifyListeners();
   }
 
-  // --- Double-Tap Actions and Settings ---
+  // --- Double-Tap Actions ---
   Future<void> toggleDoubleTapLockScreen() async {
     _doubleTapLockScreen = !_doubleTapLockScreen;
     final prefs = await SharedPreferences.getInstance();
@@ -512,8 +652,6 @@ class LauncherState extends ChangeNotifier {
   Future<void> requestDefaultLauncher() async {
     try {
       await _channel.invokeMethod('requestDefaultLauncher');
-      // Don't eagerly check here — the result arrives via onDefaultLauncherChanged
-      // callback (RoleManager path) or the next handleResume call (Settings path).
     } catch (_) {}
   }
 
@@ -555,7 +693,14 @@ class LauncherState extends ChangeNotifier {
     } catch (_) {}
   }
 
-  // --- Distraction App Allocation Timer ---
+  Future<void> openAppSettings(String packageName) async {
+    try {
+      await _channel.invokeMethod('openAppSettings', {
+        'packageName': packageName,
+      });
+    } catch (_) {}
+  }
+
   Future<void> startDistractionTimer(
     String packageName,
     int durationMinutes,
@@ -567,6 +712,92 @@ class LauncherState extends ChangeNotifier {
       });
     } catch (e) {
       debugPrint("Failed to start distraction timer: $e");
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  DEEP-FOCUS BLOCKER SYSTEM
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  Future<void> configureBlockingRules({
+    required Set<String> blockedPackages,
+    required Map<String, int> dailyLimits,
+    required bool blockFirstShort,
+    required Set<String> restrictedKeywords,
+  }) async {
+    try {
+      await _channel.invokeMethod('configureBlockingRules', {
+        'blockedPackages': blockedPackages.toList(),
+        'dailyLimits': dailyLimits,
+        'blockFirstShort': blockFirstShort,
+        'restrictedKeywords': restrictedKeywords.toList(),
+      });
+    } catch (e) {
+      debugPrint("Failed to configure blocking rules: $e");
+    }
+  }
+
+  Future<void> startDailyMonitoring() async {
+    try {
+      await _channel.invokeMethod('startDailyMonitoring');
+    } catch (e) {
+      debugPrint("Failed to start daily monitoring: $e");
+    }
+  }
+
+  Future<void> stopDailyMonitoring() async {
+    try {
+      await _channel.invokeMethod('stopDailyMonitoring');
+    } catch (e) {
+      debugPrint("Failed to stop daily monitoring: $e");
+    }
+  }
+
+  Future<void> startAppMonitoring(List<String> blockedPackages) async {
+    try {
+      await _channel.invokeMethod('startMonitoring', {
+        'blockedApps': blockedPackages,
+      });
+    } catch (e) {
+      debugPrint("Failed to start app monitoring: $e");
+    }
+  }
+
+  Future<void> stopAppMonitoring() async {
+    try {
+      await _channel.invokeMethod('stopMonitoring');
+    } catch (e) {
+      debugPrint("Failed to stop app monitoring: $e");
+    }
+  }
+
+  Future<void> triggerEmergencyUse(String packageName) async {
+    try {
+      await _channel.invokeMethod('triggerEmergencyUse', {
+        'packageName': packageName,
+      });
+    } catch (e) {
+      debugPrint("Failed to trigger emergency use: $e");
+    }
+  }
+
+  Future<Map<String, int>> getUsageReport() async {
+    try {
+      final result = await _channel.invokeMethod('getUsageReport');
+      if (result is Map) {
+        return Map<String, int>.from(result);
+      }
+    } catch (e) {
+      debugPrint("Failed to get usage report: $e");
+    }
+    return {};
+  }
+
+  Future<bool> isBlockerOverlayShowing() async {
+    try {
+      return await _channel.invokeMethod('isBlockerOverlayShowing') ?? false;
+    } catch (e) {
+      return false;
     }
   }
 
@@ -587,7 +818,6 @@ class LauncherState extends ChangeNotifier {
   int get monthlyStudySeconds => _monthlyStudySeconds;
   int get monthlyDistractedSeconds => _monthlyDistractedSeconds;
 
-  // --- Weekly Study Chart Data ---
   Future<void> loadWeeklyData() async {
     final prefs = await SharedPreferences.getInstance();
     final studyResult = <String, int>{};
@@ -602,7 +832,6 @@ class LauncherState extends ChangeNotifier {
     _weeklyStudyData = studyResult;
     _weeklyDistractedData = distractedResult;
 
-    // Monthly calculation (past 30 days)
     int mStudy = 0;
     int mDistract = 0;
     for (int i = 29; i >= 0; i--) {
@@ -630,7 +859,6 @@ class LauncherState extends ChangeNotifier {
         _tasks = [];
       }
     }
-    // Reset recurring tasks at the start of each new day, and auto-archive completed non-recurring tasks
     final todayStr = _todayKey();
     final lastReset = prefs.getString('tasks_last_reset') ?? '';
     if (lastReset != todayStr) {
@@ -644,7 +872,7 @@ class LauncherState extends ChangeNotifier {
       }
       if (_activeTaskId != null &&
           _tasks.indexWhere((t) => t['id'] == _activeTaskId) == -1) {
-        _activeTaskId = null; // Unset active if it was deleted
+        _activeTaskId = null;
       }
       await prefs.setString('tasks_last_reset', todayStr);
       await _saveTasks();
@@ -654,7 +882,6 @@ class LauncherState extends ChangeNotifier {
   Future<void> _saveTasks() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('focus_tasks', jsonEncode(_tasks));
-    // Immediately notify listeners so analytics panels re-render
     notifyListeners();
   }
 
@@ -698,7 +925,6 @@ class LauncherState extends ChangeNotifier {
     };
     _tasks.add(task);
     await _saveTasks();
-    // notifyListeners() called by _saveTasks()
   }
 
   Future<void> updateTaskEstimatedPomodoros(String taskId, int count) async {
@@ -713,7 +939,6 @@ class LauncherState extends ChangeNotifier {
     _tasks.removeWhere((t) => t['id'] == taskId);
     if (_activeTaskId == taskId) _activeTaskId = null;
     await _saveTasks();
-    // notifyListeners() called by _saveTasks()
   }
 
   Future<void> toggleTaskComplete(String taskId) async {
@@ -748,9 +973,8 @@ class LauncherState extends ChangeNotifier {
 
   void switchActiveTask(String? newTaskId) {
     if (_isPomodoroActive && !_isBreak) {
-      // Calculate how many seconds have elapsed since we last accounted for time
-      int currentElapsed = (25 * 60) - _pomodoroSecondsRemaining;
-      int newlyElapsed = currentElapsed - _pomodoroAccountedSeconds;
+      final currentElapsed = pomodoroElapsedSeconds;
+      final newlyElapsed = currentElapsed - _pomodoroAccountedSeconds;
       if (newlyElapsed > 0) {
         _attributeSecondsToTask(_activeTaskId, newlyElapsed);
         _studySeconds += newlyElapsed;

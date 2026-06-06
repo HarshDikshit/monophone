@@ -51,9 +51,9 @@
             <property android:name="android.app.PROPERTY_SPECIAL_USE_CATEGORY" android:value="Focus and distraction locking system for study sessions."/>
         </service>
 
-        <!-- Accessibility Service to lock the screen on double tap -->
+        <!-- Deep-Focus Blocker Accessibility Service: smart reels/shorts blocker, browser URL keyword blocker, and double-tap lock screen -->
         <service
-            android:name=".LockScreenAccessibilityService"
+            android:name=".FocusAccessibilityService"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
             android:exported="true">
             <intent-filter>
@@ -73,13 +73,31 @@
             <property android:name="android.app.PROPERTY_SPECIAL_USE_CATEGORY" android:value="Ongoing Pomodoro timer with floating overlay."/>
         </service>
 
-        <!-- Distraction App Limit Timer Service -->
+        <!-- Emergency Use Timer Service (replaces DistractionTimerService) -->
         <service
-            android:name=".DistractionTimerService"
+            android:name=".EmergencyUseTimerService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="specialUse">
-            <property android:name="android.app.PROPERTY_SPECIAL_USE_CATEGORY" android:value="Distraction application access limitation timer."/>
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_CATEGORY" android:value="Emergency use 5-minute countdown timer with expiry enforcement."/>
+        </service>
+
+        <!-- Daily Usage Monitoring Service (per-app accumulation with limits) -->
+        <service
+            android:name=".DailyUsageMonitorService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_CATEGORY" android:value="Daily app usage tracking and limit enforcement for focus blocking."/>
+        </service>
+
+        <!-- Full-screen Blocker Overlay Service (uses SYSTEM_ALERT_WINDOW) -->
+        <service
+            android:name=".BlockerOverlayService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_CATEGORY" android:value="Full-screen blocking overlay to enforce focus and distraction rules."/>
         </service>
 
         <!-- Don't delete the meta-data below.

@@ -32,6 +32,7 @@ class PomodoroOverlayService : Service() {
         const val ACTION_START = "com.dixit.monophone.START"
         const val ACTION_PLAY_PAUSE = "com.dixit.monophone.PLAY_PAUSE"
         const val ACTION_STOP = "com.dixit.monophone.STOP"
+        const val ACTION_SKIP_BREAK = "com.dixit.monophone.SKIP_BREAK"
         
         const val STATE_FOCUS = "FOCUS"
         const val STATE_BREAK = "BREAK"
@@ -51,26 +52,29 @@ class PomodoroOverlayService : Service() {
     var secondsRemaining = 25 * 60
     var totalDurationSeconds = 25 * 60
     var taskName = "Focus Block"
+    var timerMode = "countdown" // "countdown" or "countup"
     
-    // Debounce: update notification every 5 ticks to avoid rapid-fire NotificationManager.notify() crashes
-    private var notificationTickCounter = 0
-
     private val handler = Handler(Looper.getMainLooper())
     private val tickRunnable = object : Runnable {
         override fun run() {
             if (isRunning && !isPaused) {
-                if (secondsRemaining > 0) {
-                    secondsRemaining--
+                if (timerMode == "countup") {
+                    // COUNT-UP: secondsRemaining = elapsed seconds (counts up from 0, never stops)
+                    secondsRemaining++
+                    updateUI()
                     notifyTick()
                 } else {
-                    handleTimerComplete()
+                    // COUNTDOWN: secondsRemaining = remaining (counts down to 0)
+                    if (secondsRemaining > 0) {
+                        secondsRemaining--
+                        notifyTick()
+                    } else {
+                        handleTimerComplete()
+                    }
+                    updateUI()
                 }
-                updateUI()
-                notificationTickCounter++
-                if (notificationTickCounter >= 5) {
-                    notificationTickCounter = 0
-                    updateNotification()
-                }
+                // Always update notification every tick for persistent display
+                updateNotification()
             }
             handler.postDelayed(this, 1000)
         }
@@ -104,11 +108,17 @@ class PomodoroOverlayService : Service() {
             ACTION_START -> {
                 taskName = intent.getStringExtra("taskName") ?: "Focus Block"
                 val duration = intent.getIntExtra("durationSeconds", 25 * 60)
-                secondsRemaining = duration
+                timerMode = intent.getStringExtra("timerMode") ?: "countdown"
                 totalDurationSeconds = duration
                 isBreak = intent.getBooleanExtra("isBreak", false)
                 isRunning = true
                 isPaused = false
+                
+                if (timerMode == "countup") {
+                    secondsRemaining = 0  // start at 0, counts up (elapsed)
+                } else {
+                    secondsRemaining = duration  // start at duration, counts down
+                }
                 
                 showOverlay()
                 updateUI()
@@ -122,6 +132,9 @@ class PomodoroOverlayService : Service() {
                 notifyStateChanged()
             }
             ACTION_STOP -> {
+                stopPomodoro()
+            }
+            ACTION_SKIP_BREAK -> {
                 stopPomodoro()
             }
         }
@@ -140,9 +153,8 @@ class PomodoroOverlayService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun handleTimerComplete() {
-        // Play click / sound / vibration notification
-        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        // Vibrator pattern or warning
+        // Count-up mode never auto-completes — user must stop manually
+        if (timerMode == "countup") return
         
         if (!isBreak) {
             // Focus ended -> Start break
@@ -152,7 +164,7 @@ class PomodoroOverlayService : Service() {
         } else {
             // Break ended -> Start focus
             isBreak = false
-            secondsRemaining = 25 * 60
+            secondsRemaining = totalDurationSeconds
             taskName = "Focus Block"
         }
         
@@ -162,8 +174,11 @@ class PomodoroOverlayService : Service() {
     private fun stopPomodoro() {
         isRunning = false
         isPaused = false
-        // Calculate elapsed focus seconds before destroying the service
-        val elapsedSeconds = if (!isBreak) (totalDurationSeconds - secondsRemaining) else 0
+        val elapsedSeconds = if (!isBreak) {
+            if (timerMode == "countup") secondsRemaining  // elapsed = current value
+            else (totalDurationSeconds - secondsRemaining)
+        } else 0
+        
         val arguments = mapOf(
             "status" to "STOPPED",
             "secondsRemaining" to secondsRemaining,
@@ -172,7 +187,6 @@ class PomodoroOverlayService : Service() {
             "taskName" to taskName,
             "elapsedSeconds" to elapsedSeconds
         )
-        // Post to main looper to ensure Flutter channel call completes before stopSelf
         handler.post {
             try {
                 MainActivity.channel?.invokeMethod("onPomodoroStateChanged", arguments)
@@ -195,7 +209,9 @@ class PomodoroOverlayService : Service() {
 
     private fun notifyStateChanged(customStatus: String? = null) {
         val status = customStatus ?: if (isPaused) "PAUSED" else if (isBreak) "BREAK" else "FOCUSING"
-        val elapsed = if (!isBreak) (totalDurationSeconds - secondsRemaining) else 0
+        val elapsed = if (!isBreak) {
+            if (timerMode == "countup") secondsRemaining else (totalDurationSeconds - secondsRemaining)
+        } else 0
         val arguments = mapOf(
             "status" to status,
             "secondsRemaining" to secondsRemaining,
@@ -296,7 +312,6 @@ class PomodoroOverlayService : Service() {
                 }
                 setPadding(0, (4 * dp).toInt(), 0, (4 * dp).toInt())
             }
-            // Add progress bar styling programmatically or keep default
             addView(expProgress)
             
             // Time remaining text
@@ -409,7 +424,6 @@ class PomodoroOverlayService : Service() {
         }
         
         shrunkView.setOnTouchListener(touchListener)
-        // Header is also draggable in expanded view
         expHeader.setOnTouchListener(touchListener)
     }
 
@@ -443,20 +457,20 @@ class PomodoroOverlayService : Service() {
         
         shrunkText.text = "[$timeStr]"
         
-        expHeader.text = if (isBreak) "BREAK TIME" else "FOCUSING"
+        expHeader.text = if (isBreak) "BREAK TIME" else if (timerMode == "countup") "∞ COUNT UP" else "FOCUSING"
         expTaskText.text = taskName
         expTimeText.text = timeStr
         
-        val totalSec = if (isBreak) 5 * 60 else 25 * 60
+        // Progress bar: in count-up mode cap at 100 min for visual reference
+        val totalSec = if (timerMode == "countup") 100 * 60 else if (isBreak) 5 * 60 else totalDurationSeconds
         expProgress.max = totalSec
-        expProgress.progress = totalSec - secondsRemaining
+        expProgress.progress = if (timerMode == "countup") (secondsRemaining % totalSec) else (totalSec - secondsRemaining)
         
         expPlayPauseBtn.text = if (isPaused) "PLAY" else "PAUSE"
     }
 
-    // --- Notification Panel System ---
+    // --- Custom Persistent Notification using RemoteViews ---
     private fun createNotification(): Notification {
-        // ── Pending intents ───────────────────────────────────────────────────
         val immutableFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         else PendingIntent.FLAG_UPDATE_CURRENT
@@ -480,43 +494,53 @@ class PomodoroOverlayService : Service() {
             immutableFlag
         )
 
-        // ── State label ───────────────────────────────────────────────────────
-        val stateLabel = when {
-            isPaused -> "PAUSED"
-            isBreak  -> "BREAK TIME"
-            else     -> "FOCUS TO-DO"
-        }
-        val contentText = "$stateLabel  ·  ${taskName.uppercase()}".take(50)
+        // Build custom notification layout using RemoteViews
+        val remoteViews = RemoteViews(packageName, R.layout.custom_pomodoro_notification)
 
-        // ── Display the current remaining time in mm:ss format ────────────
-        val timeText = formatTime(secondsRemaining)
-        val contentTextWithTime = if (isPaused) {
-            "Paused · $timeText"
+        // --- Update text fields: secondsRemaining is always the display value ---
+        // - countdown: secondsRemaining = remaining
+        // - countup:   secondsRemaining = elapsed
+        val minutes = secondsRemaining / 60
+        val seconds = secondsRemaining % 60
+        val timeStr = String.format("%02d:%02d", minutes, seconds)
+
+        // Task title
+        remoteViews.setTextViewText(R.id.task_title,
+            if (isBreak) "BREAK TIME" else taskName.uppercase())
+
+        // Timer text
+        remoteViews.setTextViewText(R.id.timer_text, timeStr)
+
+        // Timer color based on state
+        if (isBreak) {
+            remoteViews.setTextColor(R.id.timer_text, Color.parseColor("#4CAF50"))
+        } else if (isPaused) {
+            remoteViews.setTextColor(R.id.timer_text, Color.parseColor("#FF9800"))
         } else {
-            "$timeText · $stateLabel"
+            remoteViews.setTextColor(R.id.timer_text, Color.parseColor("#FF5722"))
         }
+
+        // --- Update icon based on play/pause state ---
+        remoteViews.setImageViewResource(R.id.btn_play_pause,
+            if (isPaused) android.R.drawable.ic_media_play else android.R.drawable.ic_media_pause)
+
+        // --- Set click intents ---
+        remoteViews.setOnClickPendingIntent(R.id.btn_play_pause, playPausePendingIntent)
+        remoteViews.setOnClickPendingIntent(R.id.btn_stop, stopPendingIntent)
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_media_play)
-            .setContentTitle(contentText)
-            .setContentText(contentTextWithTime)
             .setContentIntent(contentIntent)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setOngoing(true)
             .setSilent(true)
-            .addAction(android.R.drawable.ic_media_play,
-                if (isPaused) "Resume" else "Pause", playPausePendingIntent)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop", stopPendingIntent)
+            .setCustomContentView(remoteViews)
+            .setStyle(NotificationCompat.DecoratedCustomViewStyle())
 
         return builder.build()
     }
 
-    private fun formatTime(seconds: Int): String {
-        return String.format("%02d:%02d", seconds / 60, seconds % 60)
-    }
-
     private fun updateNotification() {
-        // Guard: don't crash if the service is being torn down
         if (!isRunning && !isPaused) return
         try {
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -528,15 +552,17 @@ class PomodoroOverlayService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val serviceChannel = NotificationChannel(
                 CHANNEL_ID,
-                "Pomodoro Service Channel",
-                NotificationManager.IMPORTANCE_LOW
-            )
+                "Pomodoro Timer",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Persistent Pomodoro timer notification"
+                setShowBadge(false)
+            }
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(serviceChannel)
         }
     }
 
-    // Drawable utilities
     private fun createCircleDrawable(color: Int, strokeColor: Int, strokeWidth: Int): GradientDrawable {
         return GradientDrawable().apply {
             shape = GradientDrawable.OVAL

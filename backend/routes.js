@@ -15,6 +15,32 @@ const MIN_SUPPORTED_VERSION = process.env.APP_MIN_SUPPORTED_VERSION || "0.9.0";
 const RELEASE_NOTES =
   process.env.APP_RELEASE_NOTES || "Bug fixes and performance improvements.";
 
+// Redis-style in-memory cache (replace with ioredis in prod).
+// Used to avoid hammering MongoDB for analytics queries.
+const analyticsCache = new Map();
+const CACHE_TTL_MS = 60 * 1000;
+function getCached(key) {
+  const entry = analyticsCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.timestamp > CACHE_TTL_MS) {
+    analyticsCache.delete(key);
+    return null;
+  }
+  return entry.data;
+}
+function setCached(key, data) {
+  analyticsCache.set(key, { timestamp: Date.now(), data });
+  if (analyticsCache.size > 1000) {
+    const firstKey = analyticsCache.keys().next().value;
+    analyticsCache.delete(firstKey);
+  }
+}
+function invalidateUserAnalytics(userId) {
+  for (const k of analyticsCache.keys()) {
+    if (k.startsWith(`analytics:${userId}`)) analyticsCache.delete(k);
+  }
+}
+
 const BUG_REPORT_EMAIL =
   process.env.BUG_REPORT_EMAIL || process.env.SUPPORT_EMAIL ||
   "support@yourdomain.com";
@@ -431,6 +457,219 @@ router.post("/activity/sync", authenticateToken, async (req, res) => {
 });
 
 // ----------------------------------------------------
+// BATCH SYNC (timer start, pause, stop, break_start, break_end)
+// Lightweight event endpoint.  Used by the mobile app to notify the
+// backend whenever the Pomodoro timer changes state.  Avoids the heavy
+// /activity/sync endpoint for event-only updates.
+// ----------------------------------------------------
+router.post("/activity/batch-sync", authenticateToken, async (req, res) => {
+  try {
+    const { event, timestamp, currentDay } = req.body;
+    if (!event || !timestamp) {
+      return res
+        .status(400)
+        .json({ message: "event and timestamp are required" });
+    }
+
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    if (currentDay) {
+      const streakMaintained = (user.dailyStudySeconds || 0) >= 1800;
+      await DailyActivity.findOneAndUpdate(
+        { userId: req.user.id, date: currentDay },
+        {
+          $set: {
+            streakMaintained,
+            lastEvent: event,
+            lastEventAt: new Date(timestamp),
+          },
+        },
+        { upsert: true, new: true },
+      );
+    }
+
+    // Recalculate globalScore.
+    const recentActivities = await DailyActivity.find({ userId: req.user.id })
+      .sort({ date: -1 })
+      .limit(7);
+    let recentStudySecondsSum = 0;
+    let streakCount = 0;
+    for (const act of recentActivities) {
+      recentStudySecondsSum += act.totalStudySeconds;
+      if (act.streakMaintained) streakCount++;
+    }
+    const calculatedScore = recentStudySecondsSum + streakCount * 3600;
+
+    await User.findByIdAndUpdate(req.user.id, {
+      globalScore: calculatedScore,
+    });
+
+    // Invalidate analytics cache so the next /analytics fetch returns fresh data.
+    invalidateUserAnalytics(req.user.id);
+
+    res.json({
+      success: true,
+      event,
+      globalScore: calculatedScore,
+      message: `Event '${event}' recorded`,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// ----------------------------------------------------
+// COMPREHENSIVE ANALYTICS ENDPOINT
+// Cached for 60 seconds to avoid hammering MongoDB for frequently
+// viewed analytics dashboards.
+// ----------------------------------------------------
+router.get("/analytics", authenticateToken, async (req, res) => {
+  try {
+    const daysBack = parseInt(req.query.days) || 30;
+    const cacheKey = `analytics:${req.user.id}:${daysBack}`;
+
+    const cached = getCached(cacheKey);
+    if (cached) {
+      return res.json({ ...cached, _fromCache: true });
+    }
+
+    const user = await User.findById(req.user.id)
+      .select("-password")
+      .populate("groupId", "groupName category memberCount creatorId");
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const cutoffDate = new Date();
+    cutoffDate.setUTCDate(cutoffDate.getUTCDate() - daysBack);
+    const cutoffDateStr = cutoffDate.toISOString().split("T")[0];
+
+    const activities = await DailyActivity.find({
+      userId: req.user.id,
+      date: { $gte: cutoffDateStr },
+    }).sort({ date: 1 });
+
+    // Per-day map for quick lookup.
+    const dailyMap = {};
+    for (const act of activities) {
+      dailyMap[act.date] = {
+        date: act.date,
+        studySeconds: act.totalStudySeconds || 0,
+        distractedSeconds: act.totalDistractedSeconds || 0,
+        streakMaintained: act.streakMaintained || false,
+        lastEvent: act.lastEvent || null,
+        lastEventAt: act.lastEventAt || null,
+      };
+    }
+
+    // Fill empty days so the calendar is continuous.
+    const dailyList = [];
+    for (let i = daysBack - 1; i >= 0; i--) {
+      const d = new Date();
+      d.setUTCDate(d.getUTCDate() - i);
+      const key = d.toISOString().split("T")[0];
+      dailyList.push(
+        dailyMap[key] || {
+          date: key,
+          studySeconds: 0,
+          distractedSeconds: 0,
+          streakMaintained: false,
+          lastEvent: null,
+          lastEventAt: null,
+        },
+      );
+    }
+
+    // Aggregate metrics.
+    let totalStudySeconds = 0;
+    let totalDistractedSeconds = 0;
+    let streakDays = 0;
+    let activeDays = 0;
+    let maxDayStudy = 0;
+    let mostProductiveDay = null;
+    for (const day of dailyList) {
+      totalStudySeconds += day.studySeconds;
+      totalDistractedSeconds += day.distractedSeconds;
+      if (day.streakMaintained) streakDays++;
+      if (day.studySeconds > 0) activeDays++;
+      if (day.studySeconds > maxDayStudy) {
+        maxDayStudy = day.studySeconds;
+        mostProductiveDay = day.date;
+      }
+    }
+    const totalSeconds = totalStudySeconds + totalDistractedSeconds;
+    const focusRatio = totalSeconds > 0
+      ? Math.round((totalStudySeconds / totalSeconds) * 100)
+      : 0;
+    const averageDailySeconds = daysBack > 0
+      ? Math.round(totalStudySeconds / daysBack)
+      : 0;
+
+    // Period breakdowns.
+    const today = new Date().toISOString().split("T")[0];
+    const todayData = dailyMap[today] || { studySeconds: 0, distractedSeconds: 0 };
+    const oneWeekAgo = new Date();
+    oneWeekAgo.setUTCDate(oneWeekAgo.getUTCDate() - 7);
+    const weekStart = oneWeekAgo.toISOString().split("T")[0];
+    let weeklyStudySeconds = 0;
+    let weeklyDistractedSeconds = 0;
+    for (const day of dailyList) {
+      if (day.date >= weekStart) {
+        weeklyStudySeconds += day.studySeconds;
+        weeklyDistractedSeconds += day.distractedSeconds;
+      }
+    }
+
+    // Hourly distribution (for the heatmap in the analytics screen).
+    const hourlyDistribution = new Array(24).fill(0);
+    for (const act of activities) {
+      if (act.lastEventAt) {
+        const hr = new Date(act.lastEventAt).getUTCHours();
+        hourlyDistribution[hr] += act.totalStudySeconds || 0;
+      }
+    }
+
+    // Build the response payload.
+    const response = {
+      user: {
+        id: user._id,
+        name: user.name,
+        targetGoal: user.targetGoal,
+        globalScore: user.globalScore,
+        currentStreak: user.dailyStudySeconds,
+        weeklyStudySeconds: user.weeklyStudySeconds,
+        totalStudySeconds: user.totalStudySeconds,
+      },
+      summary: {
+        todayStudySeconds: todayData.studySeconds || 0,
+        todayDistractedSeconds: todayData.distractedSeconds || 0,
+        weeklyStudySeconds,
+        weeklyDistractedSeconds,
+        monthlyStudySeconds: totalStudySeconds,
+        monthlyDistractedSeconds: totalDistractedSeconds,
+        averageDailySeconds,
+        focusRatio,
+        activeDays,
+        streakDays,
+        mostProductiveDay,
+        mostProductiveDaySeconds: maxDayStudy,
+      },
+      daily: dailyList,
+      hourly: hourlyDistribution,
+      fromCache: false,
+    };
+
+    setCached(cacheKey, response);
+    res.json(response);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// ----------------------------------------------------
 // BUDDIES (LOVED ONES LOOP)
 // ----------------------------------------------------
 
@@ -755,9 +994,9 @@ router.get("/rankings", authenticateToken, async (req, res) => {
             score:
               category === "weekly" ?
                 myUser.weeklyStudySeconds
-              : myUser.totalStudySeconds,
+                : myUser.totalStudySeconds,
           }
-        : null,
+          : null,
     });
   } catch (error) {
     res.status(500).json({ message: error.message });

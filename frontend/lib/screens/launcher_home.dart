@@ -1,11 +1,17 @@
 import 'dart:async';
+import 'dart:io' show Process;
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/launcher_state.dart';
 import '../services/api_service.dart';
 import '../services/update_service.dart';
+import '../services/blocker_service.dart';
 import '../widgets/update_dialog.dart';
 
 class LauncherHome extends StatefulWidget {
@@ -29,6 +35,7 @@ class _LauncherHomeState extends State<LauncherHome>
   // Analytics
   String _analyticsTab = 'WEEKLY';
   int _selectedBarIndex = -1;
+  final GlobalKey _analyticsShareKey = GlobalKey();
 
   // Scratchpad / Thought Dump
   String _scratchpadText = '';
@@ -154,7 +161,92 @@ class _LauncherHomeState extends State<LauncherHome>
     }
   }
 
+  // Share Analytics as Screenshot
+  Future<void> _shareAnalyticsScreenshot() async {
+    try {
+      // Find the RepaintBoundary
+      final RenderRepaintBoundary? boundary =
+          _analyticsShareKey.currentContext?.findRenderObject()
+              as RenderRepaintBoundary?;
+
+      if (boundary == null) {
+        _showShareError();
+        return;
+      }
+
+      // Capture the widget as image
+      final ui.Image image = await boundary.toImage(pixelRatio: 3.0);
+      final ByteData? byteData = await image.toByteData(
+        format: ui.ImageByteFormat.png,
+      );
+
+      if (byteData == null) {
+        _showShareError();
+        return;
+      }
+
+      final Uint8List pngBytes = byteData.buffer.asUint8List();
+
+      // Share using share_plus
+      await Share.shareXFiles(
+        [
+          XFile.fromData(
+            pngBytes,
+            mimeType: 'image/png',
+            name: 'study_analytics.png',
+          ),
+        ],
+        text:
+            'My Study Analytics 📊\n'
+            'Focus: ${_formatDurationForShare()}\n'
+            'Goal: ${Provider.of<LauncherState>(context, listen: false).lastGoal}',
+        subject: 'Study Analytics - Minimalist Launcher',
+      );
+    } catch (e) {
+      debugPrint('Screenshot share error: $e');
+      _showShareError();
+    }
+  }
+
+  void _showShareError() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Failed to share screenshot. Try again.',
+          style: TextStyle(color: Colors.white),
+        ),
+        backgroundColor: Colors.black,
+      ),
+    );
+  }
+
+  // Helper for better share text
+  String _formatDurationForShare() {
+    final state = Provider.of<LauncherState>(context, listen: false);
+    int studySec = 0;
+    int distractedSec = 0;
+
+    if (_analyticsTab == 'TODAY') {
+      studySec = state.studySeconds;
+      distractedSec = state.distractedSeconds;
+    } else if (_analyticsTab == 'WEEKLY') {
+      studySec = state.weeklyStudyData.values.fold(0, (sum, val) => sum + val);
+      distractedSec = state.weeklyDistractedData.values.fold(
+        0,
+        (sum, val) => sum + val,
+      );
+    } else {
+      studySec = state.monthlyStudySeconds;
+      distractedSec = state.monthlyDistractedSeconds;
+    }
+
+    final focus = _formatDuration(studySec);
+    final ratio = _calculateRatio(studySec, distractedSec);
+    return '$focus Focus • $ratio';
+  }
   // Countdown dialog for distraction block and allocation limit
+
   void _triggerBreathModal(String packageName, String appName) {
     int count = 5;
     Timer? countdownTimer;
@@ -402,6 +494,16 @@ class _LauncherHomeState extends State<LauncherHome>
     final packageName = app['packageName'] ?? '';
     final appName = app['name'] ?? 'App';
 
+    // ── 0. FocusTube Blocker Intercept ──────────────────────────────────────
+    // Check if the tapped app name matches anything in the FocusTube blocked
+    // list BEFORE anything else.  This fires in both Normal and Strict mode.
+    final blocker = BlockerService.instance;
+    if (blocker.isAppBlockedByName(appName) ||
+        blocker.isReelsBlockedByName(appName)) {
+      _showFocusTubeBlockOverlay(appName, packageName, blocker);
+      return;
+    }
+
     // 1. Pomodoro Hard Lock Intercept
     if (state.isPomodoroActive &&
         !state.isBreak &&
@@ -424,13 +526,338 @@ class _LauncherHomeState extends State<LauncherHome>
       return;
     }
 
-    // 2. Breath countdown check (distraction categories)
+    // 2. Distraction / Neutral launch — show simple redirect modal
     if (state.distractionApps.contains(packageName)) {
-      _triggerBreathModal(packageName, appName);
+      _showDistractionRedirectModal(appName, packageName, state);
     } else {
       // Launch immediately (Study or Permitted/Neutral app)
       state.launchApp(packageName);
     }
+  }
+
+  /// Show a simple redirect confirmation before launching a distraction app.
+  /// This replaces the old multi-step breath + time allocation dialog.
+  void _showDistractionRedirectModal(
+    String appName,
+    String packageName,
+    LauncherState state,
+  ) {
+    showGeneralDialog(
+      context: context,
+      barrierDismissible: false,
+      barrierColor: Colors.black,
+      transitionDuration: const Duration(milliseconds: 200),
+      pageBuilder: (ctx, anim1, anim2) {
+        return Scaffold(
+          backgroundColor: Colors.black,
+          body: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(32.0),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const SizedBox(height: 40),
+                      Text(
+                        'DISTRACTION',
+                        style: Theme.of(context).textTheme.headlineMedium
+                            ?.copyWith(
+                              color: Colors.white,
+                              letterSpacing: 4,
+                              fontWeight: FontWeight.w100,
+                              fontFamily: 'monospace',
+                            ),
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        'You are about to open $appName. '
+                        'This app is classified as a distraction. '
+                        'Are you sure you want to proceed?',
+                        style: TextStyle(
+                          color: Colors.grey[600],
+                          fontSize: 14,
+                          height: 1.6,
+                          fontWeight: FontWeight.w300,
+                        ),
+                      ),
+                    ],
+                  ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      GestureDetector(
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          state.launchApp(packageName);
+                        },
+                        child: Container(
+                          height: 52,
+                          decoration: BoxDecoration(
+                            border: Border.all(color: Colors.white30),
+                          ),
+                          child: const Center(
+                            child: Text(
+                              'OPEN ANYWAY',
+                              style: TextStyle(
+                                color: Colors.white38,
+                                letterSpacing: 2,
+                                fontFamily: 'monospace',
+                                fontSize: 11,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      GestureDetector(
+                        onTap: () => Navigator.pop(ctx),
+                        child: Container(
+                          height: 55,
+                          color: Colors.white,
+                          child: const Center(
+                            child: Text(
+                              'GO BACK',
+                              style: TextStyle(
+                                color: Colors.black,
+                                letterSpacing: 2,
+                                fontWeight: FontWeight.bold,
+                                fontFamily: 'monospace',
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // FocusTube Regain-Focus overlay shown when a blocked app is tapped
+  // ---------------------------------------------------------------------------
+  void _showFocusTubeBlockOverlay(
+    String appName,
+    String packageName,
+    BlockerService blocker,
+  ) {
+    final allowedChannels = blocker.allowedChannels;
+    final isStrict = blocker.isStrictMode;
+    final motivationalQuotes = [
+      'Deep work is the superpower of the 21st century. Stay focused.',
+      'A distracted mind is a defeated mind. Reclaim your focus.',
+      'Disconnect to reconnect. Your future self is waiting.',
+      'Focus on your North Star. Short-term distractions yield long-term regrets.',
+      'Concentrate all your thoughts upon the work at hand.',
+    ];
+    final quote =
+        motivationalQuotes[DateTime.now().millisecondsSinceEpoch %
+            motivationalQuotes.length];
+
+    showGeneralDialog(
+      context: context,
+      barrierDismissible: false,
+      barrierColor: Colors.black,
+      transitionDuration: const Duration(milliseconds: 250),
+      pageBuilder: (ctx, anim1, anim2) {
+        return Scaffold(
+          backgroundColor: Colors.black,
+          body: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(32.0),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // ── Header ────────────────────────────────────────────────
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.shield_rounded,
+                            color: Colors.redAccent,
+                            size: 18,
+                          ),
+                          const SizedBox(width: 10),
+                          Text(
+                            isStrict ? 'STRICT BLOCK' : 'FOCUS BLOCK',
+                            style: const TextStyle(
+                              color: Colors.redAccent,
+                              fontFamily: 'monospace',
+                              fontSize: 11,
+                              letterSpacing: 2,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 24),
+                      Text(
+                        'ACCESS BLOCKED',
+                        style: Theme.of(context).textTheme.headlineMedium
+                            ?.copyWith(
+                              color: Colors.white,
+                              letterSpacing: 4,
+                              fontWeight: FontWeight.w100,
+                              fontFamily: 'monospace',
+                            ),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        '$appName has been marked as unproductive.',
+                        style: TextStyle(
+                          color: Colors.grey[600],
+                          fontSize: 14,
+                          height: 1.6,
+                          fontWeight: FontWeight.w300,
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  // ── Motivational quote ─────────────────────────────────────
+                  Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: const BoxDecoration(
+                      border: Border(
+                        left: BorderSide(color: Colors.redAccent, width: 2),
+                      ),
+                    ),
+                    child: Text(
+                      '"$quote"',
+                      style: const TextStyle(
+                        color: Colors.white54,
+                        fontSize: 13,
+                        fontStyle: FontStyle.italic,
+                        height: 1.6,
+                      ),
+                    ),
+                  ),
+
+                  // ── Study channels list ────────────────────────────────────
+                  if (allowedChannels.isNotEmpty)
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'REGAIN FOCUS — WATCH INSTEAD:',
+                          style: TextStyle(
+                            color: Colors.greenAccent,
+                            fontFamily: 'monospace',
+                            fontSize: 10,
+                            letterSpacing: 1.5,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        ...allowedChannels
+                            .take(5)
+                            .map(
+                              (ch) => Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 3,
+                                ),
+                                child: Row(
+                                  children: [
+                                    const Icon(
+                                      Icons.check_circle,
+                                      color: Colors.greenAccent,
+                                      size: 12,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      ch,
+                                      style: const TextStyle(
+                                        color: Colors.white70,
+                                        fontFamily: 'monospace',
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                      ],
+                    ),
+
+                  // ── Actions ────────────────────────────────────────────────
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // In strict mode: only show "Go Back" — no bypass allowed
+                      if (!isStrict)
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            GestureDetector(
+                              onTap: () {
+                                Navigator.pop(ctx);
+                                // Allow opening despite the block (bypass)
+                                final st = Provider.of<LauncherState>(
+                                  context,
+                                  listen: false,
+                                );
+                                st.launchApp(packageName);
+                              },
+                              child: Container(
+                                height: 50,
+                                decoration: BoxDecoration(
+                                  border: Border.all(color: Colors.white30),
+                                ),
+                                child: const Center(
+                                  child: Text(
+                                    'OPEN ANYWAY (BYPASS)',
+                                    style: TextStyle(
+                                      color: Colors.white38,
+                                      letterSpacing: 2,
+                                      fontFamily: 'monospace',
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                          ],
+                        ),
+
+                      GestureDetector(
+                        onTap: () => Navigator.pop(ctx),
+                        child: Container(
+                          height: 55,
+                          decoration: const BoxDecoration(color: Colors.white),
+                          child: const Center(
+                            child: Text(
+                              'STAY FOCUSED',
+                              style: TextStyle(
+                                color: Colors.black,
+                                letterSpacing: 2,
+                                fontWeight: FontWeight.bold,
+                                fontFamily: 'monospace',
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
   }
 
   void _showSettingsModal(LauncherState state) {
@@ -1340,6 +1767,13 @@ class _LauncherHomeState extends State<LauncherHome>
             }
           }
         },
+        onVerticalDragEnd: (details) {
+          final velocity = details.primaryVelocity ?? 0;
+          if (velocity < -300) {
+            // Swipe up (bottom to top) -> opens pomodoro timer
+            Navigator.pushNamed(context, '/pomodoro');
+          }
+        },
         child: Stack(
           children: [
             // Layer 1: Main Home Workspace
@@ -1509,6 +1943,12 @@ class _LauncherHomeState extends State<LauncherHome>
                               _buildQuickActionBtn('PARENTS', () {
                                 Navigator.pushNamed(context, '/parent');
                               }),
+                              _buildQuickActionBtn('BLOCKER', () {
+                                Navigator.pushNamed(context, '/blocker');
+                              }),
+                              _buildQuickActionBtn('ANALYTICS', () {
+                                Navigator.pushNamed(context, '/analytics');
+                              }),
                               _buildQuickActionBtn('SETTINGS', () {
                                 _showSettingsModal(state);
                               }),
@@ -1585,6 +2025,8 @@ class _LauncherHomeState extends State<LauncherHome>
 
                                     return GestureDetector(
                                       onTap: () => _onAppTap(state, app),
+                                      onLongPress: () =>
+                                          _showAppLongPressDialog(state, app),
                                       child: Container(
                                         padding: const EdgeInsets.symmetric(
                                           vertical: 14.0,
@@ -1791,6 +2233,133 @@ class _LauncherHomeState extends State<LauncherHome>
     }
   }
 
+  void _showAppLongPressDialog(LauncherState state, Map<String, String> app) {
+    final pkg = app['packageName'] ?? '';
+    final name = app['name'] ?? '';
+    final isStudy = state.studyApps.contains(pkg);
+    final isDistraction = state.distractionApps.contains(pkg);
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1A),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              name.toUpperCase(),
+              style: const TextStyle(
+                color: Colors.white,
+                fontFamily: 'monospace',
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 1,
+              ),
+            ),
+            const SizedBox(height: 20),
+            // Open App Info in System Settings
+            GestureDetector(
+              onTap: () async {
+                state.openAppSettings(pkg);
+                Navigator.pop(ctx);
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                decoration: const BoxDecoration(
+                  border: Border(bottom: BorderSide(color: Colors.white10)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.info_outline,
+                      color: Colors.white54,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      'APP INFO',
+                      style: TextStyle(
+                        color: Colors.grey[400],
+                        fontFamily: 'monospace',
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            // Mark as Study
+            GestureDetector(
+              onTap: () {
+                Navigator.pop(ctx);
+                state.toggleAppCategory(pkg, 'study');
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                decoration: const BoxDecoration(
+                  border: Border(bottom: BorderSide(color: Colors.white10)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      isStudy ? Icons.check_circle : Icons.circle_outlined,
+                      color: isStudy ? Colors.white : Colors.white38,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      'MARK AS STUDY',
+                      style: TextStyle(
+                        color: isStudy ? Colors.white : Colors.grey[400],
+                        fontFamily: 'monospace',
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            // Mark as Distraction
+            GestureDetector(
+              onTap: () {
+                Navigator.pop(ctx);
+                state.toggleAppCategory(pkg, 'distraction');
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                decoration: const BoxDecoration(
+                  border: Border(bottom: BorderSide(color: Colors.white10)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      isDistraction ? Icons.block : Icons.circle_outlined,
+                      color: isDistraction ? Colors.redAccent : Colors.white38,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      'MARK AS DISTRACTION',
+                      style: TextStyle(
+                        color: isDistraction
+                            ? Colors.redAccent
+                            : Colors.grey[400],
+                        fontFamily: 'monospace',
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildAppDrawerOverlay(LauncherState state) {
     List<Map<String, String>> drawerApps = state.allApps;
     if (_drawerSearchQuery.isNotEmpty) {
@@ -1883,16 +2452,7 @@ class _LauncherHomeState extends State<LauncherHome>
                         itemCount: drawerApps.length,
                         itemBuilder: (context, index) {
                           final app = drawerApps[index];
-                          return ListTile(
-                            contentPadding: EdgeInsets.zero,
-                            title: Text(
-                              app['name']!.toUpperCase(),
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontFamily: 'monospace',
-                                letterSpacing: 1,
-                              ),
-                            ),
+                          return GestureDetector(
                             onTap: () {
                               setState(() {
                                 _activeOverlay = 'none';
@@ -1900,6 +2460,44 @@ class _LauncherHomeState extends State<LauncherHome>
                               });
                               _onAppTap(state, app);
                             },
+                            onLongPress: () {
+                              setState(() {
+                                _activeOverlay = 'none';
+                                _drawerSearchQuery = '';
+                              });
+                              _showAppLongPressDialog(state, app);
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                vertical: 14.0,
+                                horizontal: 0,
+                              ),
+                              decoration: const BoxDecoration(
+                                border: Border(
+                                  bottom: BorderSide(color: Colors.white10),
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      app['name']!.toUpperCase(),
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontFamily: 'monospace',
+                                        letterSpacing: 1,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                  ),
+                                  Icon(
+                                    Icons.chevron_right,
+                                    color: Colors.white24,
+                                    size: 18,
+                                  ),
+                                ],
+                              ),
+                            ),
                           );
                         },
                       ),
@@ -2024,30 +2622,60 @@ class _LauncherHomeState extends State<LauncherHome>
                       const SizedBox(height: 12),
 
                       // 2. Study Analytics Section
-                      const Text(
-                        'STUDY ANALYTICS',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontFamily: 'monospace',
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 1,
+                      RepaintBoundary(
+                        key: _analyticsShareKey,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Row(
+                              children: [
+                                const Text(
+                                  'STUDY ANALYTICS',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontFamily: 'monospace',
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                    letterSpacing: 1,
+                                  ),
+                                ),
+                                const Spacer(),
+                                GestureDetector(
+                                  onTap: _shareAnalyticsScreenshot,
+                                  child: Container(
+                                    width: 38,
+                                    height: 38,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      border: Border.all(color: Colors.white24),
+                                      color: Colors.white.withOpacity(0.03),
+                                    ),
+                                    child: const Center(
+                                      child: Icon(
+                                        Icons.share,
+                                        color: Colors.white70,
+                                        size: 18,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            Row(
+                              children: [
+                                _buildAnalyticsTabBtn('TODAY'),
+                                const SizedBox(width: 8),
+                                _buildAnalyticsTabBtn('WEEKLY'),
+                                const SizedBox(width: 8),
+                                _buildAnalyticsTabBtn('MONTHLY'),
+                              ],
+                            ),
+                            const SizedBox(height: 16),
+                            _buildAnalyticsGrid(state),
+                          ],
                         ),
                       ),
-                      const SizedBox(height: 12),
-
-                      Row(
-                        children: [
-                          _buildAnalyticsTabBtn('TODAY'),
-                          const SizedBox(width: 8),
-                          _buildAnalyticsTabBtn('WEEKLY'),
-                          const SizedBox(width: 8),
-                          _buildAnalyticsTabBtn('MONTHLY'),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-
-                      _buildAnalyticsGrid(state),
                       const SizedBox(height: 20),
 
                       const Text(

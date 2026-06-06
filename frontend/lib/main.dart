@@ -1,17 +1,25 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'screens/analytics_screen.dart';
 import 'screens/auth_screen.dart';
 import 'screens/launcher_home.dart';
 import 'screens/parent_screen.dart';
 import 'screens/pomodoro_screen.dart';
 import 'screens/social_screen.dart';
+import 'screens/focustube_blocker_screen.dart';
 import 'services/api_service.dart';
+import 'services/blocker_service.dart';
 import 'services/launcher_state.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+
+  // Pre-load FocusTube blocker rules so the launcher can intercept blocked apps
+  // immediately on first tap, without waiting for FocusTubeBlockerScreen to open.
+  await BlockerService.instance.load();
+
   runApp(
     ChangeNotifierProvider(
       create: (_) => LauncherState(),
@@ -46,74 +54,69 @@ class MyApp extends StatelessWidget {
           selectionHandleColor: Colors.white,
         ),
       ),
-      initialRoute: '/',
+      // Use home as initial route — no Loading screen flash
+      initialRoute: '/home',
       routes: {
-        '/': (context) => const TokenCheckScreen(),
+        '/home': (context) =>
+            const _AuthGate(), // Gate that checks auth silently
         '/auth': (context) => const AuthScreen(),
-        '/home': (context) => const LauncherHome(),
         '/pomodoro': (context) => const PomodoroScreen(),
+        '/analytics': (context) => const AnalyticsScreen(),
         '/social': (context) => const SocialScreen(),
         '/parent': (context) => const ParentScreen(),
+        '/blocker': (context) => const FocusTubeBlockerScreen(),
       },
     );
   }
 }
 
-class TokenCheckScreen extends StatefulWidget {
-  const TokenCheckScreen({super.key});
+/// Silently checks auth in initState. If not logged in, replaces with auth screen.
+/// Shows LauncherHome immediately and does auth check in background to avoid
+/// any "Loading..." flash on home button press.
+class _AuthGate extends StatefulWidget {
+  const _AuthGate();
 
   @override
-  State<TokenCheckScreen> createState() => _TokenCheckScreenState();
+  State<_AuthGate> createState() => _AuthGateState();
 }
 
-class _TokenCheckScreenState extends State<TokenCheckScreen> {
+class _AuthGateState extends State<_AuthGate> {
+  bool _authChecked = false;
+
   @override
   void initState() {
     super.initState();
-    _checkToken();
+    _checkAuth();
   }
 
-  Future<void> _checkToken() async {
+  Future<void> _checkAuth() async {
+    await Future.delayed(Duration.zero); // Let frame render first
     final token = await ApiService.getToken();
     if (!mounted) return;
 
-    if (token != null) {
-      // Warm up user data
-      try {
-        final state = Provider.of<LauncherState>(context, listen: false);
-        await state.fetchUserProfile();
-        await state.updateAIHeadline();
-      } catch (_) {
-        // Token might be expired, log out just in case
-        await ApiService.logout();
-        if (mounted) {
-          Navigator.pushReplacementNamed(context, '/auth');
-          return;
-        }
-      }
-      if (mounted) {
-        Navigator.pushReplacementNamed(context, '/home');
-      }
-    } else {
+    setState(() => _authChecked = true);
+
+    if (token == null) {
       Navigator.pushReplacementNamed(context, '/auth');
+      return;
+    }
+
+    // Warm up user data in background (no loading screen)
+    try {
+      final state = Provider.of<LauncherState>(context, listen: false);
+      await state.fetchUserProfile();
+      await state.updateAIHeadline();
+    } catch (_) {
+      // Token expired
+      await ApiService.logout();
+      if (mounted) {
+        Navigator.pushReplacementNamed(context, '/auth');
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
-      backgroundColor: Colors.black,
-      body: Center(
-        child: Text(
-          'LOADING...',
-          style: TextStyle(
-            color: Colors.white,
-            letterSpacing: 4.0,
-            fontSize: 12,
-            fontFamily: 'monospace',
-          ),
-        ),
-      ),
-    );
+    return const LauncherHome();
   }
 }
