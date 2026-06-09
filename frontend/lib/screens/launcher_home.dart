@@ -494,17 +494,7 @@ class _LauncherHomeState extends State<LauncherHome>
     final packageName = app['packageName'] ?? '';
     final appName = app['name'] ?? 'App';
 
-    // ── 0. FocusTube Blocker Intercept ──────────────────────────────────────
-    // Check if the tapped app name matches anything in the FocusTube blocked
-    // list BEFORE anything else.  This fires in both Normal and Strict mode.
-    final blocker = BlockerService.instance;
-    if (blocker.isAppBlockedByName(appName) ||
-        blocker.isReelsBlockedByName(appName)) {
-      _showFocusTubeBlockOverlay(appName, packageName, blocker);
-      return;
-    }
-
-    // 1. Pomodoro Hard Lock Intercept
+    // Pomodoro Hard Lock Intercept
     if (state.isPomodoroActive &&
         !state.isBreak &&
         state.distractionApps.contains(packageName)) {
@@ -526,13 +516,8 @@ class _LauncherHomeState extends State<LauncherHome>
       return;
     }
 
-    // 2. Distraction / Neutral launch — show simple redirect modal
-    if (state.distractionApps.contains(packageName)) {
-      _showDistractionRedirectModal(appName, packageName, state);
-    } else {
-      // Launch immediately (Study or Permitted/Neutral app)
-      state.launchApp(packageName);
-    }
+    // Launch immediately - native DailyUsageMonitorService enforces limits
+    state.launchApp(packageName);
   }
 
   /// Show a simple redirect confirmation before launching a distraction app.

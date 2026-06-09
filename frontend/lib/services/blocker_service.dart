@@ -5,10 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Singleton service that exposes FocusTube blocker rules to the rest of the app.
-///
-/// Loaded eagerly on first access and kept in sync whenever [FocusTubeBlockerScreen]
-/// saves its settings.  The launcher's [_onAppTap] hook reads [isAppBlocked] /
-/// [isStrictMode] to decide whether to launch or intercept.
 class BlockerService extends ChangeNotifier {
   BlockerService._internal();
   static final BlockerService instance = BlockerService._internal();
@@ -20,10 +16,20 @@ class BlockerService extends ChangeNotifier {
   DateTime? _lockUntilDate;
   String _randomChallengeText = '';
 
-  /// Channel rules: list of {name, type} where type = 'allowed' | 'blocked'
+  bool _vpnContentFilterEnabled = false;
+  bool _monochromeModeEnabled = false;
+  bool _notificationSilenceEnabled = false;
+  String _frictionGateType = 'countdown';
+  List<String> _restrictedKeywords = [];
+  Map<String, int> _dailyLimits = {}; // appName -> minutes
+
+  /// Max emergency uses per app per day (user-definable, 1-5)
+  Map<String, int> _emergencyUseCounts =
+      {}; // appName -> max emergency uses (1-5)
+
+  /// Channel rules: list of {name, type}
   List<Map<String, String>> _channels = [];
 
-  /// Display-name list of apps the user marked unproductive (e.g. "Instagram")
   List<String> _unproductiveAppNames = [];
 
   bool get isStrictMode => _isStrictMode;
@@ -32,7 +38,20 @@ class BlockerService extends ChangeNotifier {
   DateTime? get lockUntilDate => _lockUntilDate;
   String get randomChallengeText => _randomChallengeText;
   List<Map<String, String>> get channels => List.unmodifiable(_channels);
-  List<String> get unproductiveAppNames => List.unmodifiable(_unproductiveAppNames);
+  List<String> get unproductiveAppNames =>
+      List.unmodifiable(_unproductiveAppNames);
+
+  bool get vpnContentFilterEnabled => _vpnContentFilterEnabled;
+  bool get monochromeModeEnabled => _monochromeModeEnabled;
+  bool get notificationSilenceEnabled => _notificationSilenceEnabled;
+  String get frictionGateType => _frictionGateType;
+  List<String> get restrictedKeywords => _restrictedKeywords;
+  Map<String, int> get dailyLimits => _dailyLimits;
+  Map<String, int> get emergencyUseCounts => _emergencyUseCounts;
+
+  /// Get max emergency uses for a specific app (default 3 if not set)
+  int getEmergencyUsesForApp(String appName) =>
+      _emergencyUseCounts[appName] ?? 3;
 
   List<String> get allowedChannels => _channels
       .where((c) => c['type'] == 'allowed')
@@ -48,12 +67,6 @@ class BlockerService extends ChangeNotifier {
 
   bool _loaded = false;
 
-  // ---------------------------------------------------------------------------
-  // Public API
-  // ---------------------------------------------------------------------------
-
-  /// Load (or reload) settings from SharedPreferences.
-  /// Call this once at app startup and after any save in [FocusTubeBlockerScreen].
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
 
@@ -62,18 +75,53 @@ class BlockerService extends ChangeNotifier {
     _unlockOption = prefs.getString('focustube_unlock_option') ?? 'text';
 
     final lockUntilStr = prefs.getString('focustube_lock_until') ?? '';
-    _lockUntilDate =
-        lockUntilStr.isNotEmpty ? DateTime.tryParse(lockUntilStr) : null;
+    _lockUntilDate = lockUntilStr.isNotEmpty
+        ? DateTime.tryParse(lockUntilStr)
+        : null;
 
     _randomChallengeText =
-        prefs.getString('focustube_challenge_text') ?? _generateRandomString(100);
+        prefs.getString('focustube_challenge_text') ??
+        _generateRandomString(100);
+
+    _vpnContentFilterEnabled = prefs.getBool('focustube_vpn_filter') ?? false;
+    _monochromeModeEnabled = prefs.getBool('focustube_monochrome') ?? false;
+    _notificationSilenceEnabled =
+        prefs.getBool('focustube_notification_silence') ?? false;
+    _frictionGateType =
+        prefs.getString('focustube_friction_gate') ?? 'countdown';
+    _restrictedKeywords =
+        prefs.getStringList('focustube_restricted_keywords') ??
+        ['twitter.com', 'x.com', 'reddit.com', 'facebook.com', 'instagram.com'];
+
+    final dailyLimitsStr = prefs.getString('focustube_daily_limits') ?? '{}';
+    try {
+      final decoded = jsonDecode(dailyLimitsStr) as Map;
+      _dailyLimits = decoded.map(
+        (k, v) => MapEntry(k.toString(), int.parse(v.toString())),
+      );
+    } catch (_) {
+      _dailyLimits = {};
+    }
+
+    // Load emergency use counts
+    final emergencyCountsStr =
+        prefs.getString('focustube_emergency_counts') ?? '{}';
+    try {
+      final decoded = jsonDecode(emergencyCountsStr) as Map;
+      _emergencyUseCounts = decoded.map(
+        (k, v) => MapEntry(k.toString(), int.parse(v.toString())),
+      );
+    } catch (_) {
+      _emergencyUseCounts = {};
+    }
 
     final channelsJson = prefs.getString('focustube_channels') ?? '';
     if (channelsJson.isNotEmpty) {
       try {
         final decoded = jsonDecode(channelsJson) as List;
-        _channels =
-            decoded.map((item) => Map<String, String>.from(item)).toList();
+        _channels = decoded
+            .map((item) => Map<String, String>.from(item))
+            .toList();
       } catch (_) {
         _channels = _defaultChannels();
       }
@@ -81,24 +129,22 @@ class BlockerService extends ChangeNotifier {
       _channels = _defaultChannels();
     }
 
-    _unproductiveAppNames = prefs.getStringList('focustube_blocked_apps') ??
+    _unproductiveAppNames =
+        prefs.getStringList('focustube_blocked_apps') ??
         ['Instagram', 'TikTok', 'Facebook'];
 
     _loaded = true;
     notifyListeners();
   }
 
-  /// Returns true if the given installed [appName] is blocked by FocusTube rules.
-  /// [packageName] is used for future native-side checks.
   bool isAppBlockedByName(String appName) {
     if (!_loaded) return false;
     final nameLower = appName.toLowerCase().trim();
-    return _unproductiveAppNames
-        .any((blocked) => blocked.toLowerCase().trim() == nameLower);
+    return _unproductiveAppNames.any(
+      (blocked) => blocked.toLowerCase().trim() == nameLower,
+    );
   }
 
-  /// Returns true if the given [appName] contains "reels" / "shorts" keywords
-  /// AND the reels-block toggle is active.
   bool isReelsBlockedByName(String appName) {
     if (!_loaded || !_blockReelsShorts) return false;
     final n = appName.toLowerCase().trim();
@@ -110,7 +156,6 @@ class BlockerService extends ChangeNotifier {
         n.contains('facebook');
   }
 
-  /// Returns true if the YouTube [channelName] is classified as blocked.
   bool isChannelBlocked(String channelName) {
     if (!_loaded) return false;
     final nameLower = channelName.toLowerCase().trim();
@@ -122,9 +167,64 @@ class BlockerService extends ChangeNotifier {
     return false;
   }
 
-  // ---------------------------------------------------------------------------
-  // Strict-Mode lock / unlock helpers (called from FocusTubeBlockerScreen too)
-  // ---------------------------------------------------------------------------
+  Future<void> saveSettings({
+    required bool isStrictMode,
+    required bool blockReelsShorts,
+    required String unlockOption,
+    DateTime? lockUntilDate,
+    required bool vpnContentFilterEnabled,
+    required bool monochromeModeEnabled,
+    required bool notificationSilenceEnabled,
+    required String frictionGateType,
+    required List<String> restrictedKeywords,
+    required Map<String, int> dailyLimits,
+    required Map<String, int> emergencyUseCounts,
+    required List<String> unproductiveAppNames,
+    required List<Map<String, String>> channels,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    _isStrictMode = isStrictMode;
+    _blockReelsShorts = blockReelsShorts;
+    _unlockOption = unlockOption;
+    _lockUntilDate = lockUntilDate;
+    _vpnContentFilterEnabled = vpnContentFilterEnabled;
+    _monochromeModeEnabled = monochromeModeEnabled;
+    _notificationSilenceEnabled = notificationSilenceEnabled;
+    _frictionGateType = frictionGateType;
+    _restrictedKeywords = restrictedKeywords;
+    _dailyLimits = dailyLimits;
+    _emergencyUseCounts = emergencyUseCounts;
+    _unproductiveAppNames = unproductiveAppNames;
+    _channels = channels;
+
+    await prefs.setBool('focustube_strict_mode', _isStrictMode);
+    await prefs.setBool('focustube_block_reels_shorts', _blockReelsShorts);
+    await prefs.setString('focustube_unlock_option', _unlockOption);
+    await prefs.setString(
+      'focustube_lock_until',
+      _lockUntilDate?.toIso8601String() ?? '',
+    );
+    await prefs.setBool('focustube_vpn_filter', _vpnContentFilterEnabled);
+    await prefs.setBool('focustube_monochrome', _monochromeModeEnabled);
+    await prefs.setBool(
+      'focustube_notification_silence',
+      _notificationSilenceEnabled,
+    );
+    await prefs.setString('focustube_friction_gate', _frictionGateType);
+    await prefs.setStringList(
+      'focustube_restricted_keywords',
+      _restrictedKeywords,
+    );
+    await prefs.setString('focustube_daily_limits', jsonEncode(_dailyLimits));
+    await prefs.setString(
+      'focustube_emergency_counts',
+      jsonEncode(_emergencyUseCounts),
+    );
+    await prefs.setStringList('focustube_blocked_apps', _unproductiveAppNames);
+    await prefs.setString('focustube_channels', jsonEncode(_channels));
+
+    notifyListeners();
+  }
 
   Future<void> activateStrictMode({
     required String unlockOption,
@@ -138,19 +238,16 @@ class BlockerService extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<bool> tryDeactivateStrictMode({
-    String? challengeInput,
-  }) async {
+  Future<bool> tryDeactivateStrictMode({String? challengeInput}) async {
     if (_unlockOption == 'date') {
       if (_lockUntilDate != null && DateTime.now().isBefore(_lockUntilDate!)) {
-        return false; // still locked
+        return false;
       }
     } else if (_unlockOption == 'text') {
       if ((challengeInput ?? '').trim() != _randomChallengeText.trim()) {
-        return false; // wrong challenge
+        return false;
       }
     }
-    // QR option: caller verifies externally
     _isStrictMode = false;
     _lockUntilDate = null;
     await _saveCore();
@@ -165,31 +262,31 @@ class BlockerService extends ChangeNotifier {
     notifyListeners();
   }
 
-  // ---------------------------------------------------------------------------
-  // Private helpers
-  // ---------------------------------------------------------------------------
-
   Future<void> _saveCore() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('focustube_strict_mode', _isStrictMode);
     await prefs.setString('focustube_unlock_option', _unlockOption);
     await prefs.setString(
-        'focustube_lock_until', _lockUntilDate?.toIso8601String() ?? '');
+      'focustube_lock_until',
+      _lockUntilDate?.toIso8601String() ?? '',
+    );
     await prefs.setString('focustube_challenge_text', _randomChallengeText);
   }
 
   List<Map<String, String>> _defaultChannels() => [
-        {'name': 'MIT OpenCourseWare', 'type': 'allowed'},
-        {'name': '3Blue1Brown', 'type': 'allowed'},
-        {'name': 'MrBeast', 'type': 'blocked'},
-        {'name': 'PewDiePie', 'type': 'blocked'},
-      ];
+    {'name': 'MIT OpenCourseWare', 'type': 'allowed'},
+    {'name': '3Blue1Brown', 'type': 'allowed'},
+    {'name': 'MrBeast', 'type': 'blocked'},
+    {'name': 'PewDiePie', 'type': 'blocked'},
+  ];
 
   String _generateRandomString(int length) {
     const chars =
         'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#%^&*()';
     final random = Random();
     return List.generate(
-        length, (index) => chars[random.nextInt(chars.length)]).join();
+      length,
+      (index) => chars[random.nextInt(chars.length)],
+    ).join();
   }
 }

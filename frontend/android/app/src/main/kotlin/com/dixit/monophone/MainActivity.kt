@@ -6,6 +6,7 @@ import com.dixit.monophone.FocusAccessibilityService
 import com.dixit.monophone.EmergencyUseTimerService
 import com.dixit.monophone.DailyUsageMonitorService
 import com.dixit.monophone.BlockerOverlayService
+import com.dixit.monophone.GrayscaleOverlayService
 import com.dixit.monophone.db.UsageDatabase
 
 import android.app.AppOpsManager
@@ -23,6 +24,9 @@ import java.text.SimpleDateFormat
 import java.util.ArrayList
 import java.util.Date
 import java.util.Locale
+import android.net.VpnService
+import android.content.ComponentName
+import android.util.Log
 
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.dixit.monophone/launcher"
@@ -175,12 +179,15 @@ class MainActivity : FlutterActivity() {
                     val blockFirstShort = call.argument<Boolean>("blockFirstShort") ?: true
                     val restrictedKeywords = call.argument<List<String>>("restrictedKeywords")
                         ?.toSet() ?: emptySet()
+                    val emergencyUseMaxCounts = call.argument<HashMap<String, Int>>("emergencyUseMaxCounts")
+                        ?: hashMapOf()
 
                     BlockerConfig.updateFromFlutter(
                         blockedPackages = blockedPackages,
                         dailyLimits = dailyLimits,
                         blockFirstShort = blockFirstShort,
-                        restrictedKeywords = restrictedKeywords
+                        restrictedKeywords = restrictedKeywords,
+                        emergencyUseMaxCounts = emergencyUseMaxCounts
                     )
                     result.success(true)
                 }
@@ -235,6 +242,32 @@ class MainActivity : FlutterActivity() {
                     // Conservative check: we track via the singleton state.
                     // A more precise implementation would query WindowManager.
                     result.success(false) // simplified — overlay is transient
+                }
+
+                // ── VPN, Notification, and Daltonizer (Grayscale) ────────────
+                "toggleVpn" -> {
+                    val enabled = call.argument<Boolean>("enabled") ?: false
+                    if (enabled) {
+                        startVpn()
+                    } else {
+                        stopVpn()
+                    }
+                    result.success(true)
+                }
+                "hasNotificationAccess" -> {
+                    result.success(hasNotificationAccess())
+                }
+                "requestNotificationAccess" -> {
+                    requestNotificationAccess()
+                    result.success(true)
+                }
+                "toggleSystemGrayscale" -> {
+                    val enabled = call.argument<Boolean>("enabled") ?: false
+                    toggleGrayscaleOverlay(enabled)
+                    result.success(true)
+                }
+                "isGrayscaleOverlayActive" -> {
+                    result.success(GrayscaleOverlayService.isRunning)
                 }
 
                 else -> {
@@ -532,6 +565,65 @@ class MainActivity : FlutterActivity() {
         if (requestCode == 1001) {
             val isDefault = isDefaultLauncher()
             channel?.invokeMethod("onDefaultLauncherChanged", isDefault)
+        } else if (requestCode == 2002) {
+            // VPN prepared activity result: start the service
+            if (resultCode == RESULT_OK) {
+                val startIntent = Intent(this, FocusVpnService::class.java)
+                startService(startIntent)
+            }
+        }
+    }
+
+    private fun startVpn() {
+        val intent = VpnService.prepare(this)
+        if (intent != null) {
+            startActivityForResult(intent, 2002)
+        } else {
+            val startIntent = Intent(this, FocusVpnService::class.java)
+            startService(startIntent)
+        }
+    }
+
+    private fun stopVpn() {
+        val stopIntent = Intent(this, FocusVpnService::class.java).apply {
+            action = "STOP"
+        }
+        startService(stopIntent)
+    }
+
+    private fun hasNotificationAccess(): Boolean {
+        val cn = ComponentName(this, FocusNotificationListenerService::class.java)
+        val flat = Settings.Secure.getString(contentResolver, "enabled_notification_listeners")
+        return flat != null && flat.contains(cn.flattenToString())
+    }
+
+    private fun requestNotificationAccess() {
+        val intent = Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS").apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        startActivity(intent)
+    }
+
+    /**
+     * Start or stop [GrayscaleOverlayService].
+     *
+     * This replaces the previous Settings.Secure approach which required
+     * WRITE_SECURE_SETTINGS (a signature/privileged permission — unavailable
+     * to normal apps).  The overlay approach works with just SYSTEM_ALERT_WINDOW.
+     */
+    private fun toggleGrayscaleOverlay(enabled: Boolean) {
+        if (enabled) {
+            val intent = Intent(this, GrayscaleOverlayService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
+            }
+        } else {
+            val intent = Intent(this, GrayscaleOverlayService::class.java).apply {
+                action = GrayscaleOverlayService.ACTION_STOP
+            }
+            startService(intent)
         }
     }
 }

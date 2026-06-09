@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -7,7 +8,7 @@ class ApiService {
   // The production API URL is injected at build time.
   static const String baseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'https://monophone.onrender.com/api',
+    defaultValue: 'http://192.168.1.6:5000/api',
   );
   static const String appEnv = String.fromEnvironment(
     'APP_ENV',
@@ -77,16 +78,23 @@ class ApiService {
   // User Profile
   static Future<Map<String, dynamic>> getProfile() async {
     final token = await getToken();
-    final response = await http.get(
-      Uri.parse('$baseUrl/user/profile'),
-      headers: _headers(token),
-    );
-    if (response.statusCode == 200) {
-      return jsonDecode(response.body);
+    if (token == null) throw Exception('Not authenticated');
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/user/profile'),
+        headers: _headers(token),
+      );
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      }
+      throw Exception(
+        jsonDecode(response.body)['message'] ?? 'Failed to get profile',
+      );
+    } on SocketException {
+      throw Exception('No internet connection');
+    } on http.ClientException {
+      throw Exception('Server unreachable');
     }
-    throw Exception(
-      jsonDecode(response.body)['message'] ?? 'Failed to get profile',
-    );
   }
 
   // Update Goal
@@ -172,21 +180,28 @@ class ApiService {
     int totalDistractedSeconds,
   ) async {
     final token = await getToken();
-    final response = await http.post(
-      Uri.parse('$baseUrl/activity/sync'),
-      headers: _headers(token),
-      body: jsonEncode({
-        'date': date,
-        'totalStudySeconds': totalStudySeconds,
-        'totalDistractedSeconds': totalDistractedSeconds,
-      }),
-    );
-    if (response.statusCode == 200) {
-      return jsonDecode(response.body);
+    if (token == null) throw Exception('Not authenticated');
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/activity/sync'),
+        headers: _headers(token),
+        body: jsonEncode({
+          'date': date,
+          'totalStudySeconds': totalStudySeconds,
+          'totalDistractedSeconds': totalDistractedSeconds,
+        }),
+      );
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      }
+      throw Exception(
+        jsonDecode(response.body)['message'] ?? 'Failed to sync activity',
+      );
+    } on SocketException {
+      throw Exception('No internet connection');
+    } on http.ClientException {
+      throw Exception('Server unreachable');
     }
-    throw Exception(
-      jsonDecode(response.body)['message'] ?? 'Failed to sync activity',
-    );
   }
 
   // New: Batch sync on timer events (start, pause, stop)

@@ -4,7 +4,9 @@ import '../services/api_service.dart';
 import '../services/launcher_state.dart';
 
 class AuthScreen extends StatefulWidget {
-  const AuthScreen({super.key});
+  /// If true, shown as dialog and returns true on success via Navigator.pop(context, true)
+  final bool isDialog;
+  const AuthScreen({super.key, this.isDialog = false});
 
   @override
   State<AuthScreen> createState() => _AuthScreenState();
@@ -14,7 +16,7 @@ class _AuthScreenState extends State<AuthScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _nameController = TextEditingController();
-  
+
   bool _isLogin = true;
   String _role = 'student'; // 'student' or 'parent'
   String _errorMessage = '';
@@ -55,7 +57,11 @@ class _AuthScreenState extends State<AuthScreen> {
             await state.fetchUserProfile();
             await state.updateAIHeadline();
             if (mounted) {
-              Navigator.pushReplacementNamed(context, '/home');
+              if (widget.isDialog) {
+                Navigator.pop(context, true);
+              } else {
+                Navigator.pushReplacementNamed(context, '/home');
+              }
             }
           }
         } else {
@@ -71,7 +77,11 @@ class _AuthScreenState extends State<AuthScreen> {
             await state.fetchUserProfile();
             await state.updateAIHeadline();
             if (mounted) {
-              Navigator.pushReplacementNamed(context, '/home');
+              if (widget.isDialog) {
+                Navigator.pop(context, true);
+              } else {
+                Navigator.pushReplacementNamed(context, '/home');
+              }
             }
           }
         } else {
@@ -132,7 +142,10 @@ class _AuthScreenState extends State<AuthScreen> {
                   Text(
                     _errorMessage,
                     textAlign: TextAlign.center,
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w300),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w300,
+                    ),
                   ),
                   const SizedBox(height: 20),
                 ],
@@ -141,11 +154,17 @@ class _AuthScreenState extends State<AuthScreen> {
                 if (!_isLogin) ...[
                   TextField(
                     controller: _nameController,
-                    style: const TextStyle(color: Colors.white, fontFamily: 'monospace'),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontFamily: 'monospace',
+                    ),
                     cursorColor: Colors.white,
                     decoration: InputDecoration(
                       hintText: 'NAME',
-                      hintStyle: TextStyle(color: Colors.grey[700], letterSpacing: 2.0),
+                      hintStyle: TextStyle(
+                        color: Colors.grey[700],
+                        letterSpacing: 2.0,
+                      ),
                       enabledBorder: const UnderlineInputBorder(
                         borderSide: BorderSide(color: Colors.white24),
                       ),
@@ -160,12 +179,18 @@ class _AuthScreenState extends State<AuthScreen> {
                 // Email field
                 TextField(
                   controller: _emailController,
-                  style: const TextStyle(color: Colors.white, fontFamily: 'monospace'),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontFamily: 'monospace',
+                  ),
                   keyboardType: TextInputType.emailAddress,
                   cursorColor: Colors.white,
                   decoration: InputDecoration(
                     hintText: 'EMAIL',
-                    hintStyle: TextStyle(color: Colors.grey[700], letterSpacing: 2.0),
+                    hintStyle: TextStyle(
+                      color: Colors.grey[700],
+                      letterSpacing: 2.0,
+                    ),
                     enabledBorder: const UnderlineInputBorder(
                       borderSide: BorderSide(color: Colors.white24),
                     ),
@@ -179,12 +204,18 @@ class _AuthScreenState extends State<AuthScreen> {
                 // Password field
                 TextField(
                   controller: _passwordController,
-                  style: const TextStyle(color: Colors.white, fontFamily: 'monospace'),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontFamily: 'monospace',
+                  ),
                   obscureText: true,
                   cursorColor: Colors.white,
                   decoration: InputDecoration(
                     hintText: 'PASSWORD',
-                    hintStyle: TextStyle(color: Colors.grey[700], letterSpacing: 2.0),
+                    hintStyle: TextStyle(
+                      color: Colors.grey[700],
+                      letterSpacing: 2.0,
+                    ),
                     enabledBorder: const UnderlineInputBorder(
                       borderSide: BorderSide(color: Colors.white24),
                     ),
@@ -204,16 +235,23 @@ class _AuthScreenState extends State<AuthScreen> {
                         onTap: () => setState(() => _role = 'student'),
                         child: AnimatedContainer(
                           duration: const Duration(milliseconds: 200),
-                          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                          padding: const EdgeInsets.symmetric(
+                            vertical: 8,
+                            horizontal: 16,
+                          ),
                           decoration: BoxDecoration(
                             border: Border.all(
-                              color: _role == 'student' ? Colors.white : Colors.transparent,
+                              color: _role == 'student'
+                                  ? Colors.white
+                                  : Colors.transparent,
                             ),
                           ),
                           child: Text(
                             'STUDENT',
                             style: TextStyle(
-                              color: _role == 'student' ? Colors.white : Colors.grey[600],
+                              color: _role == 'student'
+                                  ? Colors.white
+                                  : Colors.grey[600],
                               fontFamily: 'monospace',
                               fontSize: 12,
                             ),
@@ -225,16 +263,23 @@ class _AuthScreenState extends State<AuthScreen> {
                         onTap: () => setState(() => _role = 'parent'),
                         child: AnimatedContainer(
                           duration: const Duration(milliseconds: 200),
-                          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                          padding: const EdgeInsets.symmetric(
+                            vertical: 8,
+                            horizontal: 16,
+                          ),
                           decoration: BoxDecoration(
                             border: Border.all(
-                              color: _role == 'parent' ? Colors.white : Colors.transparent,
+                              color: _role == 'parent'
+                                  ? Colors.white
+                                  : Colors.transparent,
                             ),
                           ),
                           child: Text(
                             'PARENT',
                             style: TextStyle(
-                              color: _role == 'parent' ? Colors.white : Colors.grey[600],
+                              color: _role == 'parent'
+                                  ? Colors.white
+                                  : Colors.grey[600],
                               fontFamily: 'monospace',
                               fontSize: 12,
                             ),
@@ -257,7 +302,10 @@ class _AuthScreenState extends State<AuthScreen> {
                     ),
                     child: Center(
                       child: _submitting
-                          ? const CircularProgressIndicator(color: Colors.black, strokeWidth: 2)
+                          ? const CircularProgressIndicator(
+                              color: Colors.black,
+                              strokeWidth: 2,
+                            )
                           : Text(
                               _isLogin ? 'ENTER' : 'CREATE ACCOUNT',
                               style: const TextStyle(
@@ -281,7 +329,9 @@ class _AuthScreenState extends State<AuthScreen> {
                     });
                   },
                   child: Text(
-                    _isLogin ? 'CREATE AN ACCOUNT' : 'I ALREADY HAVE AN ACCOUNT',
+                    _isLogin
+                        ? 'CREATE AN ACCOUNT'
+                        : 'I ALREADY HAVE AN ACCOUNT',
                     style: const TextStyle(
                       color: Colors.white54,
                       fontSize: 11,

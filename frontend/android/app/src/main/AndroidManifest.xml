@@ -100,6 +100,37 @@
             <property android:name="android.app.PROPERTY_SPECIAL_USE_CATEGORY" android:value="Full-screen blocking overlay to enforce focus and distraction rules."/>
         </service>
 
+        <!-- System-wide Grayscale Overlay Service (uses SYSTEM_ALERT_WINDOW to desaturate all apps) -->
+        <service
+            android:name=".GrayscaleOverlayService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_CATEGORY" android:value="Full-screen grayscale overlay for monochrome mode across all apps."/>
+        </service>
+
+        <!-- Focus VPN Service (Adult Content Shield) -->
+        <service
+            android:name=".FocusVpnService"
+            android:permission="android.permission.BIND_VPN_SERVICE"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+            </intent-filter>
+        </service>
+
+        <!-- Focus Notification Listener Service (Suppresses notifications during active focus) -->
+        <service
+            android:name=".FocusNotificationListenerService"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

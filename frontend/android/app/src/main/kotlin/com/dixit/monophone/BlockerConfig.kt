@@ -43,6 +43,13 @@ object BlockerConfig {
     private val _restrictedKeywords = AtomicReference<Set<String>>(emptySet())
     val restrictedKeywords: Set<String> get() = _restrictedKeywords.get()
 
+    /**
+     * Max emergency uses per app per day, keyed by package name.
+     * Default 3. Max 5. Min 1.
+     */
+    private val _emergencyUseMaxCounts = AtomicReference<Map<String, Int>>(emptyMap())
+    val emergencyUseMaxCounts: Map<String, Int> get() = _emergencyUseMaxCounts.get()
+
     /** Hardcoded set of browser packages that the keyword-blocker scans. */
     val supportedBrowserPackages: Set<String> = setOf(
         "com.android.chrome",
@@ -116,11 +123,13 @@ object BlockerConfig {
         blockedPackages: Set<String>,
         dailyLimits: Map<String, Int>,
         blockFirstShort: Boolean,
-        restrictedKeywords: Set<String>
+        restrictedKeywords: Set<String>,
+        emergencyUseMaxCounts: Map<String, Int> = emptyMap()
     ) {
         _blockedPackages.set(blockedPackages.toSet())
         _dailyLimitsInMinutes.set(HashMap(dailyLimits))
         _blockFirstShort.set(blockFirstShort)
         _restrictedKeywords.set(restrictedKeywords.toSet())
+        _emergencyUseMaxCounts.set(HashMap(emergencyUseMaxCounts))
     }
 }

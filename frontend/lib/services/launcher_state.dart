@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'api_service.dart';
 import 'blocker_service.dart';
+import 'offline_sync_service.dart';
 
 class LauncherState extends ChangeNotifier {
   static const _channel = MethodChannel('com.dixit.monophone/launcher');
@@ -107,11 +108,16 @@ class LauncherState extends ChangeNotifier {
   bool get doubleTapOpenDrawer => _doubleTapOpenDrawer;
 
   bool _isDefaultLauncher = false;
-  bool get isDefaultLauncher => _isDefaultLauncher;
+  bool _skipDefaultLauncher = false;
+  bool get isDefaultLauncher => _isDefaultLauncher || _skipDefaultLauncher;
 
   LauncherState() {
-    _loadLocalStats();
-    refreshAppsList();
+    _init();
+  }
+
+  Future<void> _init() async {
+    await refreshAppsList();
+    await _loadLocalStats();
     _initMethodChannel();
   }
 
@@ -270,10 +276,80 @@ class LauncherState extends ChangeNotifier {
 
     await checkDefaultLauncher();
 
-    final token = await ApiService.getToken();
-    if (token != null) {
-      await fetchUserProfile();
-      await updateAIHeadline();
+    // Try to fetch user profile silently (works offline - uses cache)
+    await fetchUserProfile();
+    await updateAIHeadline();
+
+    // Initialize blocker configs and start monitoring programmatically on startup
+    try {
+      final blocker = BlockerService.instance;
+      final blockedPackageNames = <String>{};
+      for (final app in blocker.unproductiveAppNames) {
+        final match = _allApps.firstWhere(
+          (element) =>
+              (element['name'] ?? '').toLowerCase().trim() ==
+              app.toLowerCase().trim(),
+          orElse: () => <String, String>{},
+        );
+        if (match.isNotEmpty && match['packageName'] != null) {
+          blockedPackageNames.add(match['packageName']!);
+        }
+      }
+      if (blocker.blockReelsShorts) {
+        for (final app in _allApps) {
+          final name = (app['name'] ?? '').toLowerCase().trim();
+          if (name.contains('instagram') ||
+              name.contains('youtube') ||
+              name.contains('tiktok') ||
+              name.contains('facebook') ||
+              name.contains('reels') ||
+              name.contains('shorts')) {
+            blockedPackageNames.add(app['packageName']!);
+          }
+        }
+      }
+
+      final dailyLimitsMap = <String, int>{};
+      blocker.dailyLimits.forEach((appName, minutes) {
+        final match = _allApps.firstWhere(
+          (element) =>
+              (element['name'] ?? '').toLowerCase().trim() ==
+              appName.toLowerCase().trim(),
+          orElse: () => <String, String>{},
+        );
+        if (match.isNotEmpty && match['packageName'] != null) {
+          dailyLimitsMap[match['packageName']!] = minutes;
+          blockedPackageNames.add(match['packageName']!);
+        }
+      });
+
+      // Build emergency use max count map by package name
+      final emergencyUseMaxMap = <String, int>{};
+      blocker.emergencyUseCounts.forEach((appName, count) {
+        final match = _allApps.firstWhere(
+          (element) =>
+              (element['name'] ?? '').toLowerCase().trim() ==
+              appName.toLowerCase().trim(),
+          orElse: () => <String, String>{},
+        );
+        if (match.isNotEmpty && match['packageName'] != null) {
+          emergencyUseMaxMap[match['packageName']!] = count;
+        }
+      });
+
+      await configureBlockingRules(
+        blockedPackages: blockedPackageNames,
+        dailyLimits: dailyLimitsMap,
+        blockFirstShort: blocker.blockReelsShorts,
+        restrictedKeywords: blocker.restrictedKeywords.toSet(),
+        emergencyUseMaxCounts: emergencyUseMaxMap,
+      );
+
+      await startDailyMonitoring();
+      await toggleVpn(blocker.vpnContentFilterEnabled);
+      await toggleSystemGrayscale(blocker.monochromeModeEnabled);
+    } catch (e) {
+      debugPrint("Error initializing blocker service on startup: $e");
     }
   }
 
@@ -391,17 +467,35 @@ class LauncherState extends ChangeNotifier {
         orElse: () => {'name': 'App'},
       )['name'];
       final isStudy = _studyApps.contains(packageName);
-      await ApiService.updateStatus(
-        isStudy ? 'Studying ($appName)' : 'Using $appName 🛑',
-        isStudy,
-      );
 
+      // Fire-and-forget: queue status update, don't block app launch
+      _queueStatusUpdateAsync(isStudy, appName, packageName);
+
+      // Launch app immediately without waiting for network
       await _channel.invokeMethod('launchApp', {'packageName': packageName});
       return true;
     } on PlatformException catch (e) {
       debugPrint("Failed to launch app: ${e.message}");
       return false;
     }
+  }
+
+  /// Fire-and-forget: queues status update without blocking app launch
+  void _queueStatusUpdateAsync(
+    bool isStudy,
+    String? appName,
+    String packageName,
+  ) {
+    final name = appName ?? 'App';
+    ApiService.updateStatus(
+      isStudy ? 'Studying ($name)' : 'Using $name 🛑',
+      isStudy,
+    ).then((_) {}).catchError((_) {
+      OfflineSyncService.instance.queueStatusUpdate(
+        isStudy ? 'Studying ($appName)' : 'Using $appName 🛑',
+        isStudy,
+      );
+    });
   }
 
   Future<void> handleResume() async {
@@ -431,10 +525,17 @@ class LauncherState extends ChangeNotifier {
       _lastLaunchedPackage = null;
       _exitTime = null;
 
-      await ApiService.updateStatus(
-        _isPomodoroActive && !_isBreak ? 'Focusing ⚡' : 'Idle',
-        _isPomodoroActive && !_isBreak,
-      );
+      try {
+        await ApiService.updateStatus(
+          _isPomodoroActive && !_isBreak ? 'Focusing ⚡' : 'Idle',
+          _isPomodoroActive && !_isBreak,
+        );
+      } catch (_) {
+        await OfflineSyncService.instance.queueStatusUpdate(
+          _isPomodoroActive && !_isBreak ? 'Focusing ⚡' : 'Idle',
+          _isPomodoroActive && !_isBreak,
+        );
+      }
 
       await _syncStatsToBackend();
       notifyListeners();
@@ -452,19 +553,33 @@ class LauncherState extends ChangeNotifier {
         );
         await fetchUserProfile();
         await updateAIHeadline();
-      } catch (_) {}
+      } catch (_) {
+        // Offline: queue for later sync
+        await OfflineSyncService.instance.queueActivitySync(
+          _todayKey(),
+          _studySeconds,
+          _distractedSeconds,
+        );
+      }
     }
   }
 
   Future<void> setTargetGoal(String goal) async {
     _lastGoal = goal;
     await _saveLocalStats();
+    await OfflineSyncService.instance.cacheGoal(goal);
     notifyListeners();
 
     final token = await ApiService.getToken();
     if (token != null) {
-      await ApiService.updateGoal(goal);
-      await updateAIHeadline();
+      try {
+        await ApiService.updateGoal(goal);
+        await updateAIHeadline();
+      } catch (_) {
+        await OfflineSyncService.instance.queueGoalUpdate(goal);
+      }
+    } else {
+      await OfflineSyncService.instance.queueGoalUpdate(goal);
     }
   }
 
@@ -475,13 +590,27 @@ class LauncherState extends ChangeNotifier {
 
       final profile = await ApiService.getProfile();
       _userProfile = profile;
+      await OfflineSyncService.instance.cacheUserProfile(profile);
       if (profile['targetGoal'] != null &&
           profile['targetGoal'].toString().isNotEmpty) {
         _lastGoal = profile['targetGoal'];
         await _saveLocalStats();
+        await OfflineSyncService.instance.cacheGoal(_lastGoal);
       }
     } catch (e) {
       debugPrint("Error fetching user profile: $e");
+      // Offline: try to use cached profile
+      if (_userProfile == null) {
+        final cached = await OfflineSyncService.instance.getCachedProfile();
+        if (cached != null) {
+          _userProfile = cached;
+          final cachedGoal = await OfflineSyncService.instance.getCachedGoal();
+          if (cachedGoal.isNotEmpty) {
+            _lastGoal = cachedGoal;
+            await _saveLocalStats();
+          }
+        }
+      }
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -627,6 +756,46 @@ class LauncherState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Check all required permissions at once, returns map of permission name -> granted status
+  Future<Map<String, bool>> checkAllPermissions() async {
+    final result = <String, bool>{};
+    result['usageStats'] = await checkUsagePermission();
+    result['overlay'] = await checkOverlayPermission();
+    result['notification'] = await checkNotificationPermission();
+    result['accessibility'] = await checkAccessibilityPermission();
+    result['defaultLauncher'] = isDefaultLauncher;
+    try {
+      result['notificationListener'] = await hasNotificationAccess();
+    } catch (_) {
+      result['notificationListener'] = false;
+    }
+    return result;
+  }
+
+  /// Request a specific permission by name
+  Future<void> requestPermissionByName(String name) async {
+    switch (name) {
+      case 'usageStats':
+        await toggleUsagePermission();
+        break;
+      case 'overlay':
+        await requestOverlayPermission();
+        break;
+      case 'notification':
+        await requestNotificationPermission();
+        break;
+      case 'accessibility':
+        await requestAccessibilityPermission();
+        break;
+      case 'defaultLauncher':
+        await requestDefaultLauncher();
+        break;
+      case 'notificationListener':
+        await requestNotificationAccess();
+        break;
+    }
+  }
+
   // --- Double-Tap Actions ---
   Future<void> toggleDoubleTapLockScreen() async {
     _doubleTapLockScreen = !_doubleTapLockScreen;
@@ -645,6 +814,8 @@ class LauncherState extends ChangeNotifier {
   Future<void> checkDefaultLauncher() async {
     try {
       _isDefaultLauncher = await _channel.invokeMethod('isDefaultLauncher');
+      final prefs = await SharedPreferences.getInstance();
+      _skipDefaultLauncher = prefs.getBool('launcher_skip_default') ?? false;
       notifyListeners();
     } catch (_) {}
   }
@@ -724,6 +895,7 @@ class LauncherState extends ChangeNotifier {
     required Map<String, int> dailyLimits,
     required bool blockFirstShort,
     required Set<String> restrictedKeywords,
+    Map<String, int>? emergencyUseMaxCounts,
   }) async {
     try {
       await _channel.invokeMethod('configureBlockingRules', {
@@ -731,6 +903,7 @@ class LauncherState extends ChangeNotifier {
         'dailyLimits': dailyLimits,
         'blockFirstShort': blockFirstShort,
         'restrictedKeywords': restrictedKeywords.toList(),
+        'emergencyUseMaxCounts': emergencyUseMaxCounts ?? <String, int>{},
       });
     } catch (e) {
       debugPrint("Failed to configure blocking rules: $e");
@@ -997,6 +1170,149 @@ class LauncherState extends ChangeNotifier {
       _channel.invokeMethod('updateTaskName', {'taskName': newTaskName});
     }
 
+    notifyListeners();
+  }
+
+  // ── Blocker & Native Service Integrations ──
+
+  Future<void> toggleVpn(bool enabled) async {
+    try {
+      await _channel.invokeMethod('toggleVpn', {'enabled': enabled});
+    } catch (e) {
+      debugPrint("Failed to toggle VPN: $e");
+    }
+  }
+
+  Future<bool> hasNotificationAccess() async {
+    try {
+      return await _channel.invokeMethod('hasNotificationAccess') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> requestNotificationAccess() async {
+    try {
+      await _channel.invokeMethod('requestNotificationAccess');
+    } catch (e) {
+      debugPrint("Failed to request notification access: $e");
+    }
+  }
+
+  Future<void> toggleSystemGrayscale(bool enabled) async {
+    try {
+      await _channel.invokeMethod('toggleSystemGrayscale', {
+        'enabled': enabled,
+      });
+    } catch (e) {
+      debugPrint("Failed to toggle system grayscale: $e");
+    }
+  }
+
+  Future<void> updateBlockerSettings({
+    required bool isStrictMode,
+    required bool blockReelsShorts,
+    required String unlockOption,
+    DateTime? lockUntilDate,
+    required bool vpnContentFilterEnabled,
+    required bool monochromeModeEnabled,
+    required bool notificationSilenceEnabled,
+    required String frictionGateType,
+    required List<String> restrictedKeywords,
+    required Map<String, int> dailyLimits,
+    required List<String> unproductiveAppNames,
+    required List<Map<String, String>> channels,
+    Map<String, int>? emergencyUseCounts,
+  }) async {
+    await BlockerService.instance.saveSettings(
+      isStrictMode: isStrictMode,
+      blockReelsShorts: blockReelsShorts,
+      unlockOption: unlockOption,
+      lockUntilDate: lockUntilDate,
+      vpnContentFilterEnabled: vpnContentFilterEnabled,
+      monochromeModeEnabled: monochromeModeEnabled,
+      notificationSilenceEnabled: notificationSilenceEnabled,
+      frictionGateType: frictionGateType,
+      restrictedKeywords: restrictedKeywords,
+      dailyLimits: dailyLimits,
+      emergencyUseCounts:
+          emergencyUseCounts ?? BlockerService.instance.emergencyUseCounts,
+      unproductiveAppNames: unproductiveAppNames,
+      channels: channels,
+    );
+
+    // Re-sync rules with native side
+    final blockedPackageNames = <String>{};
+    for (final app in unproductiveAppNames) {
+      final match = _allApps.firstWhere(
+        (element) =>
+            (element['name'] ?? '').toLowerCase().trim() ==
+            app.toLowerCase().trim(),
+        orElse: () => <String, String>{},
+      );
+      if (match.isNotEmpty && match['packageName'] != null) {
+        blockedPackageNames.add(match['packageName']!);
+      }
+    }
+    if (blockReelsShorts) {
+      for (final app in _allApps) {
+        final name = (app['name'] ?? '').toLowerCase().trim();
+        if (name.contains('instagram') ||
+            name.contains('youtube') ||
+            name.contains('tiktok') ||
+            name.contains('facebook') ||
+            name.contains('reels') ||
+            name.contains('shorts')) {
+          blockedPackageNames.add(app['packageName']!);
+        }
+      }
+    }
+
+    final dailyLimitsMap = <String, int>{};
+    dailyLimits.forEach((appName, minutes) {
+      final match = _allApps.firstWhere(
+        (element) =>
+            (element['name'] ?? '').toLowerCase().trim() ==
+            appName.toLowerCase().trim(),
+        orElse: () => <String, String>{},
+      );
+      if (match.isNotEmpty && match['packageName'] != null) {
+        dailyLimitsMap[match['packageName']!] = minutes;
+        blockedPackageNames.add(match['packageName']!);
+      }
+    });
+
+    // Build emergency use max counts by package name
+    final emergencyUseMaxMap = <String, int>{};
+    (emergencyUseCounts ?? BlockerService.instance.emergencyUseCounts).forEach((
+      appName,
+      count,
+    ) {
+      final match = _allApps.firstWhere(
+        (element) =>
+            (element['name'] ?? '').toLowerCase().trim() ==
+            appName.toLowerCase().trim(),
+        orElse: () => <String, String>{},
+      );
+      if (match.isNotEmpty && match['packageName'] != null) {
+        emergencyUseMaxMap[match['packageName']!] = count;
+      }
+    });
+
+    await configureBlockingRules(
+      blockedPackages: blockedPackageNames,
+      dailyLimits: dailyLimitsMap,
+      blockFirstShort: blockReelsShorts,
+      restrictedKeywords: restrictedKeywords.toSet(),
+      emergencyUseMaxCounts: emergencyUseMaxMap,
+    );
+
+    // Restart daily monitoring to apply new limits
+    await stopDailyMonitoring();
+    await startDailyMonitoring();
+
+    await toggleVpn(vpnContentFilterEnabled);
+    await toggleSystemGrayscale(monochromeModeEnabled);
     notifyListeners();
   }
 }

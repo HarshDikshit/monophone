@@ -207,9 +207,12 @@ class DailyUsageMonitorService : Service() {
         val intent = Intent(this, BlockerOverlayService::class.java).apply {
             putExtra("blockedPackage", packageName)
             putExtra("blockReason", reason)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         }
-        startActivity(intent)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
 
         try {
             MainActivity.channel?.invokeMethod("onBlockTriggered", mapOf(

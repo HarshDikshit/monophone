@@ -142,9 +142,12 @@ class EmergencyUseTimerService : Service() {
         val overlayIntent = Intent(this, BlockerOverlayService::class.java).apply {
             putExtra("blockedPackage", targetPackage)
             putExtra("blockReason", "Emergency use expired — $blockReason")
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         }
-        startActivity(overlayIntent)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(overlayIntent)
+        } else {
+            startService(overlayIntent)
+        }
 
         // ── Return to home ───────────────────────────────────────────────────
         try {

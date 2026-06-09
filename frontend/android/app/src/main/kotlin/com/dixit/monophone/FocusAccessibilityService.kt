@@ -3,6 +3,7 @@ package com.dixit.monophone
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.Intent
+import android.os.Build
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
@@ -78,6 +79,18 @@ class FocusAccessibilityService : AccessibilityService() {
         val packageName = event.packageName?.toString() ?: return
         currentForegroundPackage = packageName
 
+        // ── Enforce strict mode settings/uninstall block ─────────────────────
+        if (isStrictModeActive()) {
+            if (packageName == "com.android.settings" ||
+                packageName == "com.google.android.packageinstaller" ||
+                packageName == "com.android.packageinstaller"
+            ) {
+                Log.w(TAG, "Strict mode is active. Intercepting settings/uninstall attempt.")
+                performGlobalAction(GLOBAL_ACTION_HOME)
+                return
+            }
+        }
+
         // ── Cooldown check ───────────────────────────────────────────────────
         val now = System.currentTimeMillis()
         val lastScan = lastScanTime[packageName] ?: 0L
@@ -87,12 +100,12 @@ class FocusAccessibilityService : AccessibilityService() {
         try {
             // ── Engine 1: Reels/Shorts detection for social apps ─────────────
             if (isReelsShortsPackage(packageName)) {
-                // Only process window state changes (new Activity / app launch)
-                // NOT content changes (reel scrolling).  This prevents the
-                // constant re-triggering that causes the "dialog repeatedly popping".
-                if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-                    scanForReelsShorts(packageName)
-                }
+                // Fire on both WINDOW_STATE_CHANGED (new Activity / app launch)
+                // AND WINDOW_CONTENT_CHANGED (in-app tab navigation like
+                // YouTube's Shorts tab appearing without Activity change).
+                // The per-package SCAN_COOLDOWN_MS (800ms) above already
+                // prevents excessive re-scanning on scroll events.
+                scanForReelsShorts(packageName)
                 return
             }
 
@@ -105,6 +118,23 @@ class FocusAccessibilityService : AccessibilityService() {
         } catch (e: Exception) {
             Log.w(TAG, "Error processing event for $packageName: ${e.message}")
         }
+    }
+
+    private fun isStrictModeActive(): Boolean {
+        val prefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE)
+        val isStrict = prefs.getBoolean("flutter.focustube_strict_mode", false)
+        if (!isStrict) return false
+        val lockUntilStr = prefs.getString("flutter.focustube_lock_until", "") ?: ""
+        if (lockUntilStr.isNotEmpty()) {
+            try {
+                // ISO date parsing
+                val date = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US).parse(lockUntilStr)
+                if (date != null && System.currentTimeMillis() < date.time) {
+                    return true
+                }
+            } catch (_: Exception) {}
+        }
+        return isStrict
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -133,18 +163,43 @@ class FocusAccessibilityService : AccessibilityService() {
      * not be exposed).
      */
     private fun scanForReelsShorts(packageName: String) {
+        // Check if the reels/shorts blocker is actually enabled in BlockerConfig.
+        // If no blocked packages are configured yet, skip.
+        // (BlockerConfig is populated when Flutter calls configureBlockingRules).
+        // We still check even when blockedPackages is empty because the user
+        // might have set the blockReelsShorts flag via SharedPreferences directly.
+        val prefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE)
+        val blockReelsEnabled = prefs.getBoolean("flutter.focustube_block_reels_shorts", false)
+        if (!blockReelsEnabled) return
+
         // Prevent re-blocking the same package within 10 seconds.
         val now = System.currentTimeMillis()
         val lastBlock = lastBlockTime[packageName] ?: 0L
         if (now - lastBlock < BLOCK_COOLDOWN_MS) return
 
         // Check if the current activity text indicates reels/shorts.
-        val isInShortsFeed = checkIfInShortsFeed()
+        val isInShortsFeed = checkIfInShortsFeed(packageName)
 
         if (isInShortsFeed) {
+            // Respect the blockFirstShort toggle:
+            //   true  (Toggle A) → block even the very first short
+            //   false (Toggle B) → let the first one play; block on the next
+            val blockFirst = BlockerConfig.blockFirstShort
+            val alreadyAcknowledged = BlockerConfig.isFirstReelAcknowledged(packageName)
+
+            if (!blockFirst && !alreadyAcknowledged) {
+                // Allow the first one — just mark it acknowledged.
+                BlockerConfig.setFirstReelAcknowledged(packageName, true)
+                Log.i(TAG, "First reel/short allowed for $packageName (Toggle B).")
+                return
+            }
+
             Log.i(TAG, "Reels/Shorts detected for $packageName — blocking.")
             lastBlockTime[packageName] = now
             triggerBlockerOverlay(packageName, "Smart Reels/Shorts Blocker")
+        } else {
+            // User navigated away from the shorts feed — reset the Toggle B flag.
+            BlockerConfig.clearFirstReelAcknowledged(packageName)
         }
     }
 
@@ -155,38 +210,49 @@ class FocusAccessibilityService : AccessibilityService() {
      * On Samsung devices, resource IDs may not be reliable.  We use
      * content descriptions and text content as the primary signal.
      */
-    private fun checkIfInShortsFeed(): Boolean {
+    private fun checkIfInShortsFeed(packageName: String): Boolean {
         // Try get the root via the most reliable method for Samsung.
         val root = rootInActiveWindow
         if (root != null) {
             try {
                 // Quick scan of all text on screen.
-                val textContent = extractAllVisibleText(root)
+                val textContent = extractAllVisibleText(root).lowercase(java.util.Locale.US)
                 if (textContent.isNotEmpty()) {
-                    // YouTube Shorts indicator.
-                    if (textContent.contains("shorts") ||
-                        textContent.contains("short") ||
-                        textContent.contains("reels") ||
-                        textContent.contains("reel")
-                    ) {
-                        root.recycle()
-                        return true
+                    if (packageName.contains("youtube")) {
+                        // Avoid blocking main home screens
+                        val isHomeScreen = textContent.contains("home") && textContent.contains("subscriptions")
+                        if (isHomeScreen) {
+                            root.recycle()
+                            return false
+                        }
+
+                        // Shorts watch layout elements: Dislike, Remix, Share
+                        val hasShortsPlayerText = textContent.contains("dislike") &&
+                                textContent.contains("remix") &&
+                                (textContent.contains("share") || textContent.contains("comments"))
+                        
+                        if (hasShortsPlayerText) {
+                            root.recycle()
+                            return true
+                        }
                     }
 
-                    // Check for common shorts feed UI patterns in text.
-                    val lines = textContent.split("\n")
-                    var reelLikeCount = 0
-                    for (line in lines) {
-                        val l = line.lowercase().trim()
-                        if (l.isEmpty()) continue
-                        // Shorts have short single-line comments, like counts.
-                        if (l.contains("shorts") || l.contains("short")) {
-                            reelLikeCount++
+                    if (packageName.contains("instagram")) {
+                        val isHomeScreen = textContent.contains("search") && textContent.contains("profile")
+                        if (isHomeScreen) {
+                            root.recycle()
+                            return false
                         }
-                        if (l.endsWith("k") && l.length < 8) reelLikeCount++
+
+                        val isInReels = textContent.contains("reel") || textContent.contains("reels")
+                        if (isInReels) {
+                            root.recycle()
+                            return true
+                        }
                     }
-                    // If multiple short-form indicators found.
-                    if (reelLikeCount >= 2) {
+
+                    // Predefined simple match
+                    if (textContent.contains("shorts") || textContent.contains("reels")) {
                         root.recycle()
                         return true
                     }
@@ -201,9 +267,9 @@ class FocusAccessibilityService : AccessibilityService() {
         val focused = findFocus(android.view.accessibility.AccessibilityNodeInfo.FOCUS_INPUT) ?:
                       findFocus(android.view.accessibility.AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
         if (focused != null) {
-            val text = focused.text?.toString()?.lowercase() ?: ""
-            val desc = focused.contentDescription?.toString()?.lowercase() ?: ""
-            val className = focused.className?.toString()?.lowercase() ?: ""
+            val text = focused.text?.toString()?.lowercase(java.util.Locale.US) ?: ""
+            val desc = focused.contentDescription?.toString()?.lowercase(java.util.Locale.US) ?: ""
+            val className = focused.className?.toString()?.lowercase(java.util.Locale.US) ?: ""
             focused.recycle()
 
             // Check if focus is on a reel-like element.
@@ -307,22 +373,44 @@ class FocusAccessibilityService : AccessibilityService() {
     // ══════════════════════════════════════════════════════════════════════════
 
     /**
-     * NOTIFY Flutter that a block was triggered.
+     * Start [BlockerOverlayService] directly from the accessibility service.
      *
-     * CRITICAL: Does NOT call GLOBAL_ACTION_HOME.  Previously this was
-     * sending the user home every time a reels event fired, causing the
-     * "dialog continuously popping" issue.  Now we just notify Flutter
-     * and let the UI decide how to handle it.
+     * CRITICAL FIX: Previously this only notified Flutter via MethodChannel,
+     * but the Flutter side had no handler for "onBlockTriggered", so the block
+     * was silently swallowed.  Now we start the overlay service directly so it
+     * works even when Flutter/MainActivity is not in the foreground.
+     *
+     * We also perform GLOBAL_ACTION_BACK to pull the user out of the shorts
+     * feed before the overlay appears, preventing the "shorts playing behind
+     * the overlay" visual glitch.
      */
     private fun triggerBlockerOverlay(packageName: String, reason: String) {
         try {
-            MainActivity.channel?.invokeMethod("onBlockTriggered", mapOf(
-                "packageName" to packageName,
-                "reason" to reason
-            ))
+            // Navigate away from the shorts screen first.
+            performGlobalAction(GLOBAL_ACTION_BACK)
+
+            // Start the full-screen blocking overlay.
+            val overlayIntent = Intent(this, BlockerOverlayService::class.java).apply {
+                putExtra("blockedPackage", packageName)
+                putExtra("blockReason", reason)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(overlayIntent)
+            } else {
+                startService(overlayIntent)
+            }
+
+            // Also notify Flutter (best-effort) so analytics/UI can update.
+            try {
+                MainActivity.channel?.invokeMethod("onBlockTriggered", mapOf(
+                    "packageName" to packageName,
+                    "reason" to reason
+                ))
+            } catch (_: Exception) {}
+
             Log.i(TAG, "Block triggered: $packageName — $reason")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to notify Flutter: ${e.message}")
+            Log.e(TAG, "Failed to trigger blocker overlay: ${e.message}")
         }
     }
 

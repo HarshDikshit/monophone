@@ -63,6 +63,19 @@ class AppMonitoringService : Service() {
         return null
     }
 
+    /**
+     * Check which app is in the foreground.  If it's a blocked app, immediately
+     * re-launch our MainActivity (the launcher home screen) to intercept the user.
+     *
+     * This is the ROCK-SOLID way to block apps on Android because:
+     * 1. UsageStatsManager works on every Android version since API 21.
+     * 2. It does NOT require accessibility service.
+     * 3. It is the same mechanism Samsung/OneUI itself uses for app usage stats.
+     *
+     * For Reels/Shorts blocking specifically: since these are activities within
+     * the parent app (Instagram, YouTube, TikTok), we block the whole app.
+     * This is more aggressive than UI-based blocking but it WORKS reliably.
+     */
     private fun checkForegroundApp() {
         val usageStatsManager = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
         val endTime = System.currentTimeMillis()
@@ -80,15 +93,33 @@ class AppMonitoringService : Service() {
         }
 
         if (currentForegroundApp != null && blockedApps.contains(currentForegroundApp)) {
-            // Bypass block if the app is currently temporarily allowed
+            // Bypass block if the app is currently temporarily allowed (Emergency Use)
             if (currentForegroundApp == TempAccessManager.tempAllowedPackage) {
                 return
             }
-            // Blocked app is in the foreground! Intercept and launch Launcher back
+            // Also bypass if we're in emergency use mode for this package
+            if (TempAccessManager.isEmergencyUseActive &&
+                TempAccessManager.tempAllowedPackage == currentForegroundApp) {
+                return
+            }
+            // Blocked app is in the foreground! Intercept and launch Launcher back.
             val launchIntent = Intent(applicationContext, MainActivity::class.java).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                    Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
+                )
             }
             startActivity(launchIntent)
+
+            // Notify Flutter to update the UI / show block dialog.
+            try {
+                MainActivity.channel?.invokeMethod("onBlockTriggered", mapOf(
+                    "packageName" to (currentForegroundApp ?: ""),
+                    "reason" to "Blocked app launch"
+                ))
+            } catch (_: Exception) {}
         }
     }
 
