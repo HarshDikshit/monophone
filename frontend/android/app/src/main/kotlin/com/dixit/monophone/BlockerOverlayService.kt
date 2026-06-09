@@ -58,8 +58,16 @@ class BlockerOverlayService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        blockedPackage = intent?.getStringExtra("blockedPackage") ?: ""
-        blockReason = intent?.getStringExtra("blockReason") ?: "Focus rule triggered"
+        val newPackage = intent?.getStringExtra("blockedPackage") ?: ""
+        val newReason = intent?.getStringExtra("blockReason") ?: "Focus rule triggered"
+
+        // If already showing for the same package, just update reason text if needed.
+        if (isShowing && newPackage == blockedPackage) {
+            return START_NOT_STICKY
+        }
+
+        blockedPackage = newPackage
+        blockReason = newReason
 
         // Don't show overlay if this package is in emergency-use mode.
         if (blockedPackage.isNotEmpty() &&
@@ -71,6 +79,12 @@ class BlockerOverlayService : Service() {
         }
 
         startForeground(NOTIFICATION_ID, createNotification())
+
+        // Hide any previous overlay before showing new one.
+        if (isShowing) {
+            hideOverlay()
+            isShowing = false
+        }
 
         // Show the overlay after a brief delay to let the blocked Activity settle.
         handler.postDelayed({
@@ -198,7 +212,7 @@ class BlockerOverlayService : Service() {
             "Focus on your North Star.",
             "Short-term distractions yield long-term regrets."
         )
-        val quote = quotes[System.currentTimeMillis().toInt() % quotes.size]
+        val quote = quotes[(System.currentTimeMillis() % quotes.size).toInt()]
 
         val quoteCard = FrameLayout(ctx).apply {
             layoutParams = LinearLayout.LayoutParams(
@@ -232,19 +246,29 @@ class BlockerOverlayService : Service() {
         })
 
         // ── Emergency Use button ─────────────────────────────────────────────
-        val emergencyBtn = Button(ctx).apply {
-            text = "EMERGENCY USE (5 min)"
-            textSize = 14f
-            typeface = Typeface.MONOSPACE
-            setTextColor(Color.WHITE)
-            setBackgroundColor(Color.parseColor("#33FF4444"))
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                (52 * dp).toInt()
-            ).apply { bottomMargin = (12 * dp).toInt() }
-            setOnClickListener { onEmergencyUse() }
+        val isReelsShortsBlock = blockReason.contains("Reels/Shorts", ignoreCase = true) || 
+                                 blockReason.contains("Reels", ignoreCase = true) || 
+                                 blockReason.contains("Shorts", ignoreCase = true)
+        val remaining = TempAccessManager.getRemainingEmergencyCount(ctx, blockedPackage)
+
+        if (!isReelsShortsBlock && remaining > 0) {
+            val emergencyBtn = Button(ctx).apply {
+                text = "EMERGENCY USE (5 min) ($remaining left)"
+                textSize = 14f
+                typeface = Typeface.MONOSPACE
+                setTextColor(Color.WHITE)
+                setBackgroundColor(Color.parseColor("#33FF4444"))
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    (52 * dp).toInt()
+                ).apply { bottomMargin = (12 * dp).toInt() }
+                setOnClickListener { 
+                    TempAccessManager.incrementUsedEmergencyCount(ctx, blockedPackage)
+                    onEmergencyUse() 
+                }
+            }
+            container.addView(emergencyBtn)
         }
-        container.addView(emergencyBtn)
 
         // ── Return to Focus button ───────────────────────────────────────────
         val focusBtn = Button(ctx).apply {
@@ -270,9 +294,10 @@ class BlockerOverlayService : Service() {
             else
                 @Suppress("DEPRECATION")
                 WindowManager.LayoutParams.TYPE_PHONE,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            // NOTE: Do NOT add FLAG_NOT_FOCUSABLE — it prevents buttons from receiving touch events.
+            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                    WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
             PixelFormat.TRANSLUCENT
         ).apply { gravity = Gravity.FILL }
 

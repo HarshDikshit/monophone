@@ -223,32 +223,64 @@ class ApiService {
   }
 
   // New: Get comprehensive analytics for the dashboard
+  // Supports offline fallback: caches last successful response in SharedPreferences.
+  static const _analyticsCacheKey = 'analytics_cache_json';
+
   static Future<Map<String, dynamic>> getAnalytics({int daysBack = 30}) async {
     final token = await getToken();
-    final response = await http.get(
-      Uri.parse('$baseUrl/analytics?days=$daysBack'),
-      headers: _headers(token),
-    );
-    if (response.statusCode == 200) {
+    try {
+      final response = await http
+          .get(
+            Uri.parse('$baseUrl/analytics?days=$daysBack'),
+            headers: _headers(token),
+          )
+          .timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        try {
+          final data = jsonDecode(response.body) as Map<String, dynamic>;
+          // Cache the successful response for offline use.
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString(_analyticsCacheKey, response.body);
+          return data;
+        } catch (_) {
+          throw Exception(
+            'Server returned invalid data. Please try again later.',
+          );
+        }
+      }
+      // Try to extract error message from JSON, fall back to status code + body preview
       try {
-        return jsonDecode(response.body);
-      } catch (_) {
+        final body = jsonDecode(response.body);
         throw Exception(
-          'Server returned invalid data. Please try again later.',
+          body['message'] ?? 'Failed to load analytics (${response.statusCode})',
+        );
+      } catch (e) {
+        if (e is Exception) rethrow;
+        throw Exception(
+          'Server error (${response.statusCode}). The analytics endpoint may be unavailable.',
         );
       }
+    } on SocketException {
+      return _getAnalyticsCacheFallback();
+    } on http.ClientException {
+      return _getAnalyticsCacheFallback();
+    } on TimeoutException {
+      return _getAnalyticsCacheFallback();
     }
-    // Try to extract error message from JSON, fall back to status code + body preview
+  }
+
+  /// Returns cached analytics data from SharedPreferences, or throws if none available.
+  static Future<Map<String, dynamic>> _getAnalyticsCacheFallback() async {
     try {
-      final body = jsonDecode(response.body);
-      throw Exception(
-        body['message'] ?? 'Failed to load analytics (${response.statusCode})',
-      );
-    } catch (_) {
-      throw Exception(
-        'Server error (${response.statusCode}). The analytics endpoint may be unavailable.',
-      );
-    }
+      final prefs = await SharedPreferences.getInstance();
+      final cached = prefs.getString(_analyticsCacheKey);
+      if (cached != null && cached.isNotEmpty) {
+        final data = jsonDecode(cached) as Map<String, dynamic>;
+        // Tag the response so the UI can show an 'offline' indicator.
+        return {...data, '_offline': true};
+      }
+    } catch (_) {}
+    throw Exception('No internet connection and no cached analytics available.');
   }
 
   // Buddies: Add

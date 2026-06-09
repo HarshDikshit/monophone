@@ -37,15 +37,23 @@ class DailyUsageMonitorService : Service() {
         private const val TAG = "DailyUsageMonitor"
         private const val CHANNEL_ID = "DailyUsageMonitorChannel"
         private const val NOTIFICATION_ID = 10
-        private const val POLL_INTERVAL_MS = 5000L
+        private const val POLL_INTERVAL_MS = 2000L   // 2-second poll — enough for reliable foreground detection
         private const val FLUSH_INTERVAL_MS = 30_000L
     }
 
     private val handler = Handler(Looper.getMainLooper())
     private var isRunning = false
 
-    /** In-memory accumulator: packageName → seconds accumulated since last DB flush. */
-    private val pendingAccumulator = HashMap<String, Int>()
+    /**
+     * In-memory accumulator: packageName → MILLISECONDS accumulated since last DB flush.
+     * Using ms internally avoids integer-truncation loss when poll interval < 1s.
+     */
+    private val pendingAccumulatorMs = HashMap<String, Long>()
+
+    /** In-memory total accumulated today tracker (in SECONDS) to check limits instantly. */
+    private val totalAccumulatedToday = HashMap<String, Int>()
+    private var lastFlushedDate: String? = null
+    private var activeForegroundApp: String? = null
 
     /** Timestamp (SystemClock.elapsedRealtime) of the last UsageEvents query. */
     private var lastQueryTime = 0L
@@ -76,12 +84,59 @@ class DailyUsageMonitorService : Service() {
 
         isRunning = true
         lastQueryTime = SystemClock.elapsedRealtime()
-        pendingAccumulator.clear()
+        pendingAccumulatorMs.clear()
+
+        loadInitialUsageData()
+        initializeActiveForegroundApp()
 
         handler.post(pollRunnable)
         handler.post(flushRunnable)
 
         return START_STICKY
+    }
+
+    private fun loadInitialUsageData() {
+        val date = todayDateString()
+        val database = UsageDatabase.getInstance(this)
+        val dao = database.dailyUsageDao()
+
+        UsageDatabase.databaseWriteExecutor.execute {
+            try {
+                val allUsage = dao.getAllUsageForDate(date)
+                synchronized(totalAccumulatedToday) {
+                    totalAccumulatedToday.clear()
+                    for (usage in allUsage) {
+                        totalAccumulatedToday[usage.packageName] = usage.accumulatedSeconds
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    private fun initializeActiveForegroundApp() {
+        val usageStatsManager = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+        val endTime = System.currentTimeMillis()
+        val startTime = endTime - 30000 // Query last 30 seconds
+        try {
+            val usageEvents = usageStatsManager.queryEvents(startTime, endTime)
+            val event = UsageEvents.Event()
+            var lastForeground: String? = null
+            while (usageEvents.hasNextEvent()) {
+                usageEvents.getNextEvent(event)
+                if (event.eventType == UsageEvents.Event.MOVE_TO_FOREGROUND ||
+                    event.eventType == UsageEvents.Event.ACTIVITY_RESUMED
+                ) {
+                    lastForeground = event.packageName
+                } else if (event.eventType == UsageEvents.Event.MOVE_TO_BACKGROUND ||
+                           event.eventType == UsageEvents.Event.ACTIVITY_PAUSED
+                ) {
+                    if (lastForeground == event.packageName) {
+                        lastForeground = null
+                    }
+                }
+            }
+            activeForegroundApp = lastForeground
+        } catch (_: Exception) {}
     }
 
     override fun onDestroy() {
@@ -97,15 +152,28 @@ class DailyUsageMonitorService : Service() {
     // ── Core polling ─────────────────────────────────────────────────────────
 
     private fun pollUsageStats() {
+        // Collect all packages that have any configured limit OR are in the blocked set.
+        // Do NOT return early if the set is empty — limits may still be populated.
         val blockedPackages = BlockerConfig.blockedPackages
-        if (blockedPackages.isEmpty()) return
+        val limitedPackages = BlockerConfig.dailyLimitsInMinutes.keys
+        val monitoredPackages = blockedPackages + limitedPackages
+        if (monitoredPackages.isEmpty()) return
 
         val usageStatsManager = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
         val now = SystemClock.elapsedRealtime()
         val realtimeNow = System.currentTimeMillis()
         val realtimeLastQuery = realtimeNow - (now - lastQueryTime)
 
-        val packagesSeen = HashSet<String>()
+        // Reset the date if midnight has passed
+        val currentDate = todayDateString()
+        if (lastFlushedDate != null && lastFlushedDate != currentDate) {
+            synchronized(totalAccumulatedToday) { totalAccumulatedToday.clear() }
+            pendingAccumulatorMs.clear()
+        }
+        lastFlushedDate = currentDate
+
+        // Detect the current foreground app using MOVE_TO_FOREGROUND events.
+        var detectedForeground: String? = activeForegroundApp
 
         try {
             val usageEvents = usageStatsManager.queryEvents(realtimeLastQuery, realtimeNow)
@@ -113,47 +181,74 @@ class DailyUsageMonitorService : Service() {
 
             while (usageEvents.hasNextEvent()) {
                 usageEvents.getNextEvent(event)
-                if (event.eventType == UsageEvents.Event.MOVE_TO_FOREGROUND ||
-                    event.eventType == UsageEvents.Event.MOVE_TO_BACKGROUND ||
-                    event.eventType == UsageEvents.Event.ACTIVITY_RESUMED ||
-                    event.eventType == UsageEvents.Event.ACTIVITY_PAUSED
-                ) {
-                    val pkg = event.packageName ?: continue
-                    if (blockedPackages.contains(pkg)) {
-                        packagesSeen.add(pkg)
+                when (event.eventType) {
+                    UsageEvents.Event.MOVE_TO_FOREGROUND,
+                    UsageEvents.Event.ACTIVITY_RESUMED -> {
+                        detectedForeground = event.packageName
+                    }
+                    UsageEvents.Event.MOVE_TO_BACKGROUND,
+                    UsageEvents.Event.ACTIVITY_PAUSED -> {
+                        if (detectedForeground == event.packageName) {
+                            detectedForeground = null
+                        }
                     }
                 }
             }
-
-            val elapsedMs = now - lastQueryTime
-            val elapsedSec = (elapsedMs / 1000).toInt()
-
-            for (pkg in packagesSeen) {
-                pendingAccumulator[pkg] = (pendingAccumulator[pkg] ?: 0) + elapsedSec
-            }
-
         } catch (e: SecurityException) {
             stopSelf()
+            return
         } catch (_: Exception) {}
 
+        activeForegroundApp = detectedForeground
+
+        // Accumulate elapsed time in MILLISECONDS to avoid integer-truncation loss.
+        val elapsedMs = now - lastQueryTime
         lastQueryTime = now
+
+        val foreground = activeForegroundApp
+        if (foreground != null && monitoredPackages.contains(foreground) && elapsedMs > 0L) {
+            pendingAccumulatorMs[foreground] =
+                (pendingAccumulatorMs[foreground] ?: 0L) + elapsedMs
+
+            // Convert accumulated ms → whole seconds and update in-memory total.
+            val totalMs = pendingAccumulatorMs[foreground] ?: 0L
+            val wholeSec = (totalMs / 1000L).toInt()
+            if (wholeSec > 0) {
+                synchronized(totalAccumulatedToday) {
+                    // totalAccumulatedToday holds the DB baseline + live accumulated whole-seconds.
+                    // We track how many seconds we have already added from pendingAccumulatorMs
+                    // to avoid double-counting on each poll tick.
+                    val prevLive = ((pendingAccumulatorMs[foreground]!! - elapsedMs) / 1000L).toInt()
+                    val newlyAdded = wholeSec - prevLive
+                    if (newlyAdded > 0) {
+                        totalAccumulatedToday[foreground] =
+                            (totalAccumulatedToday[foreground] ?: 0) + newlyAdded
+                    }
+                }
+            }
+        }
+
+        // Check limits immediately against the accurate in-memory total.
         checkLimitExceeded()
     }
 
     // ── DB Flush ─────────────────────────────────────────────────────────────
 
     private fun flushAccumulatedUsage() {
-        if (pendingAccumulator.isEmpty()) return
+        if (pendingAccumulatorMs.isEmpty()) return
 
         val date = todayDateString()
         val database = UsageDatabase.getInstance(this)
         val dao = database.dailyUsageDao()
 
+        // Convert ms → whole seconds before writing to DB.
         val snapshot: Map<String, Int>
-        synchronized(pendingAccumulator) {
-            snapshot = HashMap(pendingAccumulator)
-            pendingAccumulator.clear()
+        synchronized(pendingAccumulatorMs) {
+            snapshot = pendingAccumulatorMs.mapValues { (_, ms) -> (ms / 1000L).toInt() }
+                .filter { (_, s) -> s > 0 }
+            pendingAccumulatorMs.clear()
         }
+        if (snapshot.isEmpty()) return
 
         UsageDatabase.databaseWriteExecutor.execute {
             for ((pkg, seconds) in snapshot) {
@@ -161,7 +256,15 @@ class DailyUsageMonitorService : Service() {
                     dao.incrementUsage(pkg, date, seconds)
                 } catch (_: Exception) {}
             }
-            // After flush, check limits from DB.
+            // After flush, reload the DB totals into memory and re-check limits.
+            try {
+                val allUsage = dao.getAllUsageForDate(date)
+                synchronized(totalAccumulatedToday) {
+                    for (usage in allUsage) {
+                        totalAccumulatedToday[usage.packageName] = usage.accumulatedSeconds
+                    }
+                }
+            } catch (_: Exception) {}
             checkLimitExceededFromDb(dao, date)
         }
     }
@@ -172,12 +275,20 @@ class DailyUsageMonitorService : Service() {
         val limits = BlockerConfig.dailyLimitsInMinutes
         if (limits.isEmpty()) return
 
-        for ((pkg, pendingSec) in pendingAccumulator) {
-            val limitSec = (limits[pkg] ?: return) * 60
-            if (pendingSec >= limitSec) {
-                triggerBlockForPackage(pkg, "Daily usage limit exceeded")
-                return
-            }
+        val currentForeground = activeForegroundApp ?: return
+
+        // Only enforce if the current foreground app has exceeded its limit.
+        // (Limits for background apps are enforced in checkLimitExceededFromDb when
+        //  the user actually opens those apps next time.)
+        val limitMin = limits[currentForeground] ?: return
+        val limitSec = limitMin * 60
+
+        val accumulatedSec = synchronized(totalAccumulatedToday) {
+            totalAccumulatedToday[currentForeground] ?: 0
+        }
+
+        if (accumulatedSec >= limitSec) {
+            triggerBlockForPackage(currentForeground, "Daily usage limit exceeded")
         }
     }
 

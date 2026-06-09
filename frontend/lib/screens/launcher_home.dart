@@ -13,6 +13,7 @@ import '../services/api_service.dart';
 import '../services/update_service.dart';
 import '../services/blocker_service.dart';
 import '../widgets/update_dialog.dart';
+import '../widgets/panel_widgets/widget_panel.dart';
 
 class LauncherHome extends StatefulWidget {
   const LauncherHome({super.key});
@@ -37,10 +38,6 @@ class _LauncherHomeState extends State<LauncherHome>
   int _selectedBarIndex = -1;
   final GlobalKey _analyticsShareKey = GlobalKey();
 
-  // Scratchpad / Thought Dump
-  String _scratchpadText = '';
-  final _scratchpadController = TextEditingController();
-
   // Time and Date ticker
   late Timer _clockTimer;
   String _timeString = '';
@@ -54,8 +51,6 @@ class _LauncherHomeState extends State<LauncherHome>
     _clockTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       _updateClock();
     });
-    _loadScratchpad();
-
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final state = Provider.of<LauncherState>(context, listen: false);
       _goalController.text = state.lastGoal;
@@ -70,7 +65,6 @@ class _LauncherHomeState extends State<LauncherHome>
     WidgetsBinding.instance.removeObserver(this);
     _clockTimer.cancel();
     _goalController.dispose();
-    _scratchpadController.dispose();
     super.dispose();
   }
 
@@ -120,22 +114,6 @@ class _LauncherHomeState extends State<LauncherHome>
       _timeString = '$hour:$min';
       _dateString = dateStr.toUpperCase();
     });
-  }
-
-  // Load scratchpad from SharedPreferences
-  Future<void> _loadScratchpad() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _scratchpadText = prefs.getString('scratchpad_text') ?? '';
-      _scratchpadController.text = _scratchpadText;
-    });
-  }
-
-  // Save scratchpad text to SharedPreferences
-  Future<void> _saveScratchpad(String value) async {
-    _scratchpadText = value;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('scratchpad_text', value);
   }
 
   // Check for available app updates
@@ -1919,6 +1897,9 @@ class _LauncherHomeState extends State<LauncherHome>
                           scrollDirection: Axis.horizontal,
                           child: Row(
                             children: [
+                              _buildQuickActionBtn('PLAN DAY', () {
+                                Navigator.pushNamed(context, '/planner');
+                              }),
                               _buildQuickActionBtn('POMODORO', () {
                                 Navigator.pushNamed(context, '/pomodoro');
                               }),
@@ -2088,7 +2069,7 @@ class _LauncherHomeState extends State<LauncherHome>
               child: _buildAppDrawerOverlay(state),
             ),
 
-            // Layer 3: Thought Dump Overlay (Slides in from Right)
+            // Layer 3: Widget Panel Overlay (Slides in from Right, left-swipe access)
             AnimatedPositioned(
               duration: const Duration(milliseconds: 250),
               curve: Curves.easeInOut,
@@ -2096,7 +2077,13 @@ class _LauncherHomeState extends State<LauncherHome>
               top: 0,
               bottom: 0,
               width: screenWidth,
-              child: _buildThoughtDumpOverlay(state),
+              child: WidgetPanel(
+                onClose: () {
+                  setState(() {
+                    _activeOverlay = 'none';
+                  });
+                },
+              ),
             ),
           ],
         ),
@@ -2505,262 +2492,10 @@ class _LauncherHomeState extends State<LauncherHome>
     );
   }
 
-  Widget _buildThoughtDumpOverlay(LauncherState state) {
-    return Container(
-      color: Colors.black,
-      child: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    'LEFT PANEL',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontFamily: 'monospace',
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 2,
-                    ),
-                  ),
-                  Row(
-                    children: [
-                      _buildBugReportIconButton(),
-                      const SizedBox(width: 12),
-                      IconButton(
-                        icon: const Icon(Icons.close, color: Colors.white60),
-                        onPressed: () {
-                          setState(() {
-                            _activeOverlay = 'none';
-                          });
-                        },
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Expanded(
-                child: SingleChildScrollView(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      // 1. Scratchpad (Thoughts Box)
-                      const Text(
-                        'THOUGHT DUMP',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontFamily: 'monospace',
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 1,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'TYPE YOUR THOUGHTS FREELY. WRITING PERSISTS.',
-                        style: TextStyle(
-                          color: Colors.grey[750],
-                          fontSize: 9,
-                          fontFamily: 'monospace',
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          border: Border.all(color: Colors.white10),
-                          color: Colors.white.withOpacity(0.02),
-                        ),
-                        child: TextField(
-                          controller: _scratchpadController,
-                          maxLines: null,
-                          minLines: 5,
-                          keyboardType: TextInputType.multiline,
-                          style: const TextStyle(
-                            color: Colors.white70,
-                            fontFamily: 'monospace',
-                            fontSize: 13,
-                            height: 1.4,
-                          ),
-                          cursorColor: Colors.white,
-                          decoration: const InputDecoration(
-                            hintText: 'Start writing...',
-                            hintStyle: TextStyle(color: Colors.white12),
-                            border: InputBorder.none,
-                          ),
-                          onChanged: (val) {
-                            _saveScratchpad(val);
-                          },
-                        ),
-                      ),
-
-                      const SizedBox(height: 24),
-                      const Divider(color: Colors.white10),
-                      const SizedBox(height: 12),
-
-                      // 2. Study Analytics Section
-                      RepaintBoundary(
-                        key: _analyticsShareKey,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Row(
-                              children: [
-                                const Text(
-                                  'STUDY ANALYTICS',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontFamily: 'monospace',
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold,
-                                    letterSpacing: 1,
-                                  ),
-                                ),
-                                const Spacer(),
-                                GestureDetector(
-                                  onTap: _shareAnalyticsScreenshot,
-                                  child: Container(
-                                    width: 38,
-                                    height: 38,
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      border: Border.all(color: Colors.white24),
-                                      color: Colors.white.withOpacity(0.03),
-                                    ),
-                                    child: const Center(
-                                      child: Icon(
-                                        Icons.share,
-                                        color: Colors.white70,
-                                        size: 18,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 12),
-                            Row(
-                              children: [
-                                _buildAnalyticsTabBtn('TODAY'),
-                                const SizedBox(width: 8),
-                                _buildAnalyticsTabBtn('WEEKLY'),
-                                const SizedBox(width: 8),
-                                _buildAnalyticsTabBtn('MONTHLY'),
-                              ],
-                            ),
-                            const SizedBox(height: 16),
-                            _buildAnalyticsGrid(state),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 20),
-
-                      const Text(
-                        '7-DAY STUDY FOCUS (MINS)',
-                        style: TextStyle(
-                          color: Colors.white60,
-                          fontFamily: 'monospace',
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 1,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      _buildBarChart(state),
-                      const SizedBox(height: 24),
-                      const Divider(color: Colors.white10),
-                      const SizedBox(height: 12),
-
-                      const Text(
-                        'TIME DISTRIBUTION BY TASK',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontFamily: 'monospace',
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 1,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      _buildTaskTimeBreakdown(state),
-                      const SizedBox(height: 24),
-                    ],
-                  ),
-                ),
-              ),
-              const Center(
-                child: Text(
-                  'SWIPE RIGHT TO RETURN',
-                  style: TextStyle(
-                    color: Colors.white12,
-                    fontSize: 10,
-                    letterSpacing: 1.5,
-                    fontFamily: 'monospace',
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildBugReportIconButton() {
-    return Tooltip(
-      message: 'Report a bug',
-      child: GestureDetector(
-        onTap: _reportBugByEmail,
-        child: Container(
-          width: 38,
-          height: 38,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            border: Border.all(color: Colors.white24),
-            color: Colors.white.withOpacity(0.03),
-          ),
-          child: const Center(
-            child: Icon(Icons.bug_report, color: Colors.white70, size: 18),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Future<void> _reportBugByEmail() async {
-    final uri = Uri(
-      scheme: 'mailto',
-      path: 'harshdixit15031975@gmail.com',
-      queryParameters: {
-        'subject': 'Bug Report: Focus Launcher',
-        'body':
-            'Please describe the bug you encountered:\n\n- What happened:\n- Steps to reproduce:\n- Device / Android version:\n',
-      },
-    );
-
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    } else {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Unable to open email client. Please try again later.',
-            style: TextStyle(color: Colors.white),
-          ),
-          backgroundColor: Colors.black,
-        ),
-      );
-    }
-  }
+  // Note: _buildThoughtDumpOverlay and bug report methods have been replaced
+  // by the WidgetPanel component in widget_panel.dart.
+  // The old scratchpad, analytics, chart and task breakdown are now
+  // available as optional widgets users can add/remove/reorder.
 
   Widget _buildAppClassificationList(LauncherState state) {
     return Column(

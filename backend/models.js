@@ -31,7 +31,9 @@ const dailyActivitySchema = new mongoose.Schema({
   date: { type: String, required: true, index: true }, // YYYY-MM-DD format for fast indexing
   totalStudySeconds: { type: Number, default: 0 },
   totalDistractedSeconds: { type: Number, default: 0 },
-  streakMaintained: { type: Boolean, default: false }
+  streakMaintained: { type: Boolean, default: false },
+  lastEvent: { type: String, default: null },
+  lastEventAt: { type: Date, default: null }
 });
 
 // Compound unique index so there is exactly one summary per user per day

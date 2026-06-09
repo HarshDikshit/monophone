@@ -31,6 +31,7 @@ import android.util.Log
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.dixit.monophone/launcher"
     private val REQUEST_CODE_POST_NOTIFICATIONS = 2001
+    private var widgetHostManager: AppWidgetHostManager? = null
 
     companion object {
         var channel: MethodChannel? = null
@@ -38,6 +39,13 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: io.flutter.embedding.engine.FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        
+        widgetHostManager = AppWidgetHostManager(this)
+        flutterEngine.platformViewsController.registry.registerViewFactory(
+            "com.dixit.monophone/app_widget",
+            AppWidgetPlatformViewFactory()
+        )
+        
         channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
         channel?.setMethodCallHandler { call, result ->
             when (call.method) {
@@ -268,6 +276,45 @@ class MainActivity : FlutterActivity() {
                 }
                 "isGrayscaleOverlayActive" -> {
                     result.success(GrayscaleOverlayService.isRunning)
+                }
+
+                // ════════════════════════════════════════════════════════════
+                //  APP WIDGET HOST METHODS
+                // ════════════════════════════════════════════════════════════
+
+                "getAvailableWidgetProviders" -> {
+                    val providers = widgetHostManager?.getAvailableWidgetProviders() ?: emptyList()
+                    result.success(providers)
+                }
+
+                "bindAppWidget" -> {
+                    val providerName = call.argument<String>("providerName") ?: ""
+                    val host = widgetHostManager
+                    if (host != null) {
+                        host.requestBindWidget(providerName, result, this)
+                    } else {
+                        result.error("HOST_UNAVAILABLE", "AppWidgetHostManager is not initialized", null)
+                    }
+                }
+
+                "removeAppWidget" -> {
+                    val appWidgetId = call.argument<Int>("appWidgetId") ?: -1
+                    if (appWidgetId > 0) {
+                        widgetHostManager?.removeWidget(appWidgetId)
+                        result.success(true)
+                    } else {
+                        result.error("BAD_ARGS", "Invalid appWidgetId", null)
+                    }
+                }
+
+                "startWidgetHost" -> {
+                    widgetHostManager?.startListening()
+                    result.success(true)
+                }
+
+                "stopWidgetHost" -> {
+                    widgetHostManager?.stopListening()
+                    result.success(true)
                 }
 
                 else -> {
@@ -571,7 +618,14 @@ class MainActivity : FlutterActivity() {
                 val startIntent = Intent(this, FocusVpnService::class.java)
                 startService(startIntent)
             }
+        } else if (requestCode == 0x0B0B) {
+            widgetHostManager?.handleActivityResult(requestCode, resultCode, data)
         }
+    }
+
+    override fun onDestroy() {
+        widgetHostManager?.dispose()
+        super.onDestroy()
     }
 
     private fun startVpn() {

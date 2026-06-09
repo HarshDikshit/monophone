@@ -77,6 +77,9 @@ class FocusAccessibilityService : AccessibilityService() {
         if (event == null) return
 
         val packageName = event.packageName?.toString() ?: return
+        if (packageName == "com.dixit.monophone") {
+            lastBlockTime.clear()
+        }
         currentForegroundPackage = packageName
 
         // ── Enforce strict mode settings/uninstall block ─────────────────────
@@ -289,11 +292,20 @@ class FocusAccessibilityService : AccessibilityService() {
     /**
      * Extract ALL visible text from the node tree.  Used to detect
      * "Shorts" text indicators on screen.
+     *
+     * SAFETY: Hard-capped at [maxDepth] levels deep to prevent
+     * StackOverflowError on apps (e.g. YouTube) with 200+ nested ViewGroups.
+     * Also caps total output at 4096 chars to avoid excessive string allocation.
      */
-    private fun extractAllVisibleText(node: AccessibilityNodeInfo?): String {
-        if (node == null) return ""
+    private fun extractAllVisibleText(
+        node: AccessibilityNodeInfo?,
+        depth: Int = 0,
+        maxDepth: Int = 12
+    ): String {
+        if (node == null || depth > maxDepth) return ""
         val sb = StringBuilder()
         try {
+            if (sb.length > 4096) return sb.toString() // cap to avoid OOM
             val text = node.text?.toString() ?: ""
             val desc = node.contentDescription?.toString() ?: ""
             if (text.isNotEmpty() && node.isVisibleToUser) {
@@ -303,9 +315,11 @@ class FocusAccessibilityService : AccessibilityService() {
                 sb.append(desc).append("\n")
             }
             for (i in 0 until node.childCount) {
+                if (sb.length > 4096) break
                 val child = node.getChild(i) ?: continue
-                sb.append(extractAllVisibleText(child))
+                val childText = extractAllVisibleText(child, depth + 1, maxDepth)
                 child.recycle()
+                sb.append(childText)
             }
         } catch (_: Exception) {}
         return sb.toString()

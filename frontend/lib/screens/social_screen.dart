@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/api_service.dart';
 import '../services/launcher_state.dart';
+import '../services/auth_guard.dart';
 
 class SocialScreen extends StatefulWidget {
   const SocialScreen({super.key});
@@ -50,7 +51,16 @@ class _SocialScreenState extends State<SocialScreen>
     _tabController = TabController(length: 3, vsync: this)
       ..addListener(_handleTabChange);
     _rankScrollCtrl.addListener(_onRankScroll);
-    _fetchBuddies();
+    _checkAuthThenLoad();
+  }
+
+  Future<void> _checkAuthThenLoad() async {
+    await requireAuth(
+      context,
+      onAuthenticated: () {
+        _fetchBuddies();
+      },
+    );
   }
 
   @override
@@ -108,8 +118,10 @@ class _SocialScreenState extends State<SocialScreen>
         _buddyEmailController.clear();
         await _fetchBuddies();
         if (mounted) {
-          await Provider.of<LauncherState>(context, listen: false)
-              .fetchUserProfile();
+          await Provider.of<LauncherState>(
+            context,
+            listen: false,
+          ).fetchUserProfile();
         }
       } else {
         setState(() => _buddyError = res['message'] ?? 'Failed to add buddy');
@@ -178,8 +190,7 @@ class _SocialScreenState extends State<SocialScreen>
       _categoryController.clear();
       await _fetchGroups();
     } catch (e) {
-      setState(() =>
-          _groupError = e.toString().replaceAll('Exception: ', ''));
+      setState(() => _groupError = e.toString().replaceAll('Exception: ', ''));
     } finally {
       setState(() => _loadingGroups = false);
     }
@@ -195,16 +206,16 @@ class _SocialScreenState extends State<SocialScreen>
       if (res['group'] != null) {
         await _fetchGroups();
         if (mounted) {
-          await Provider.of<LauncherState>(context, listen: false)
-              .fetchUserProfile();
+          await Provider.of<LauncherState>(
+            context,
+            listen: false,
+          ).fetchUserProfile();
         }
       } else {
-        setState(() =>
-            _groupError = res['message'] ?? 'Failed to join group.');
+        setState(() => _groupError = res['message'] ?? 'Failed to join group.');
       }
     } catch (e) {
-      setState(() =>
-          _groupError = e.toString().replaceAll('Exception: ', ''));
+      setState(() => _groupError = e.toString().replaceAll('Exception: ', ''));
     } finally {
       setState(() => _loadingGroups = false);
     }
@@ -212,25 +223,27 @@ class _SocialScreenState extends State<SocialScreen>
 
   // Opens the members bottom-sheet for a group
   void _openGroupMembers(
-      String groupId, String groupName, String? currentUserId, bool isAdmin) {
+    String groupId,
+    String groupName,
+    String? currentUserId,
+    bool isAdmin,
+  ) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.black,
       shape: const Border(top: BorderSide(color: Colors.white12, width: 1)),
-      builder: (ctx) =>
-          _MembersSheet(
-            groupId: groupId,
-            groupName: groupName,
-            currentUserId: currentUserId,
-            isAdmin: isAdmin,
-            onEvict: () {
-              Navigator.pop(ctx);
-              _fetchGroups();
-              Provider.of<LauncherState>(context, listen: false)
-                  .fetchUserProfile();
-            },
-          ),
+      builder: (ctx) => _MembersSheet(
+        groupId: groupId,
+        groupName: groupName,
+        currentUserId: currentUserId,
+        isAdmin: isAdmin,
+        onEvict: () {
+          Navigator.pop(ctx);
+          _fetchGroups();
+          Provider.of<LauncherState>(context, listen: false).fetchUserProfile();
+        },
+      ),
     );
   }
 
@@ -255,7 +268,10 @@ class _SocialScreenState extends State<SocialScreen>
     });
     try {
       final data = await ApiService.getRankings(
-          category: _rankCategory, skip: 0, limit: _rankLimit);
+        category: _rankCategory,
+        skip: 0,
+        limit: _rankLimit,
+      );
       final list = (data['rankings'] ?? []) as List;
       _rankings = list;
       _rankSkip = list.length;
@@ -276,7 +292,10 @@ class _SocialScreenState extends State<SocialScreen>
     setState(() => _loadingMoreRankings = true);
     try {
       final data = await ApiService.getRankings(
-          category: _rankCategory, skip: _rankSkip, limit: _rankLimit);
+        category: _rankCategory,
+        skip: _rankSkip,
+        limit: _rankLimit,
+      );
       final list = (data['rankings'] ?? []) as List;
       setState(() {
         _rankings.addAll(list);
@@ -319,7 +338,10 @@ class _SocialScreenState extends State<SocialScreen>
           labelColor: Colors.white,
           unselectedLabelColor: Colors.grey[600],
           labelStyle: const TextStyle(
-              fontFamily: 'monospace', fontSize: 11, letterSpacing: 1),
+            fontFamily: 'monospace',
+            fontSize: 11,
+            letterSpacing: 1,
+          ),
           tabs: const [
             Tab(text: 'BUDDIES'),
             Tab(text: 'GROUPS'),
@@ -354,14 +376,19 @@ class _SocialScreenState extends State<SocialScreen>
               Text(
                 'MY BUDDIES ($count/5)',
                 style: const TextStyle(
-                    color: Colors.white,
-                    fontFamily: 'monospace',
-                    letterSpacing: 1.5,
-                    fontSize: 13,
-                    fontWeight: FontWeight.bold),
+                  color: Colors.white,
+                  fontFamily: 'monospace',
+                  letterSpacing: 1.5,
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               IconButton(
-                icon: const Icon(Icons.refresh, color: Colors.white30, size: 20),
+                icon: const Icon(
+                  Icons.refresh,
+                  color: Colors.white30,
+                  size: 20,
+                ),
                 onPressed: _fetchBuddies,
               ),
             ],
@@ -371,109 +398,133 @@ class _SocialScreenState extends State<SocialScreen>
             child: _loadingBuddies
                 ? const Center(
                     child: CircularProgressIndicator(
-                        color: Colors.white, strokeWidth: 1.5))
+                      color: Colors.white,
+                      strokeWidth: 1.5,
+                    ),
+                  )
                 : _buddies.isEmpty
-                    ? Center(
-                        child: Text('No buddies linked yet. Max 5.',
-                            style: TextStyle(
-                                color: Colors.grey[700],
-                                fontFamily: 'monospace',
-                                fontSize: 13)))
-                    : ListView.separated(
-                        itemCount: _buddies.length,
-                        separatorBuilder: (_, __) =>
-                            const Divider(color: Colors.white10),
-                        itemBuilder: (_, i) {
-                          final b = _buddies[i];
-                          final name = b['name'] ?? 'Buddy';
-                          final status = b['currentStatus'] ?? {};
-                          final activity = status['activity'] ?? 'Idle';
-                          final isStudying = status['isStudying'] ?? false;
-                          return Padding(
-                            padding:
-                                const EdgeInsets.symmetric(vertical: 12.0),
-                            child: Row(
-                              mainAxisAlignment:
-                                  MainAxisAlignment.spaceBetween,
+                ? Center(
+                    child: Text(
+                      'No buddies linked yet. Max 5.',
+                      style: TextStyle(
+                        color: Colors.grey[700],
+                        fontFamily: 'monospace',
+                        fontSize: 13,
+                      ),
+                    ),
+                  )
+                : ListView.separated(
+                    itemCount: _buddies.length,
+                    separatorBuilder: (_, __) =>
+                        const Divider(color: Colors.white10),
+                    itemBuilder: (_, i) {
+                      final b = _buddies[i];
+                      final name = b['name'] ?? 'Buddy';
+                      final status = b['currentStatus'] ?? {};
+                      final activity = status['activity'] ?? 'Idle';
+                      final isStudying = status['isStudying'] ?? false;
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 12.0),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      name.toString().toUpperCase(),
-                                      style: const TextStyle(
-                                          color: Colors.white,
-                                          fontFamily: 'monospace',
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.bold),
-                                    ),
-                                    const SizedBox(height: 3),
-                                    Text(
-                                      isStudying
-                                          ? '⚡ STUDYING'
-                                          : '🛑 IDLE',
-                                      style: TextStyle(
-                                          color: isStudying
-                                              ? Colors.white
-                                              : Colors.grey[700],
-                                          fontSize: 10,
-                                          fontFamily: 'monospace',
-                                          letterSpacing: 1),
-                                    ),
-                                  ],
-                                ),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      vertical: 4, horizontal: 8),
-                                  decoration: BoxDecoration(
-                                      border: Border.all(
-                                          color: isStudying
-                                              ? Colors.white24
-                                              : Colors.transparent)),
-                                  child: Text(
-                                    activity.toString().toUpperCase(),
-                                    style: TextStyle(
-                                        color: isStudying
-                                            ? Colors.white
-                                            : Colors.grey[600],
-                                        fontFamily: 'monospace',
-                                        fontSize: 11),
+                                Text(
+                                  name.toString().toUpperCase(),
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontFamily: 'monospace',
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.bold,
                                   ),
-                                )
+                                ),
+                                const SizedBox(height: 3),
+                                Text(
+                                  isStudying ? '⚡ STUDYING' : '🛑 IDLE',
+                                  style: TextStyle(
+                                    color: isStudying
+                                        ? Colors.white
+                                        : Colors.grey[700],
+                                    fontSize: 10,
+                                    fontFamily: 'monospace',
+                                    letterSpacing: 1,
+                                  ),
+                                ),
                               ],
                             ),
-                          );
-                        },
-                      ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                vertical: 4,
+                                horizontal: 8,
+                              ),
+                              decoration: BoxDecoration(
+                                border: Border.all(
+                                  color: isStudying
+                                      ? Colors.white24
+                                      : Colors.transparent,
+                                ),
+                              ),
+                              child: Text(
+                                activity.toString().toUpperCase(),
+                                style: TextStyle(
+                                  color: isStudying
+                                      ? Colors.white
+                                      : Colors.grey[600],
+                                  fontFamily: 'monospace',
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
           ),
           if (_buddyError.isNotEmpty) ...[
-            Text(_buddyError,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                    color: Colors.white38, fontSize: 12, fontFamily: 'monospace')),
+            Text(
+              _buddyError,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Colors.white38,
+                fontSize: 12,
+                fontFamily: 'monospace',
+              ),
+            ),
             const SizedBox(height: 12),
           ],
           if (count < 5) ...[
             Container(
               padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(border: Border.all(color: Colors.white12)),
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.white12),
+              ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   TextField(
                     controller: _buddyEmailController,
                     style: const TextStyle(
-                        color: Colors.white, fontFamily: 'monospace', fontSize: 13),
+                      color: Colors.white,
+                      fontFamily: 'monospace',
+                      fontSize: 13,
+                    ),
                     cursorColor: Colors.white,
                     decoration: InputDecoration(
                       hintText: 'ADD BUDDY BY EMAIL',
                       hintStyle: TextStyle(
-                          color: Colors.grey[800], letterSpacing: 1.5, fontSize: 12),
+                        color: Colors.grey[800],
+                        letterSpacing: 1.5,
+                        fontSize: 12,
+                      ),
                       enabledBorder: const UnderlineInputBorder(
-                          borderSide: BorderSide(color: Colors.white12)),
+                        borderSide: BorderSide(color: Colors.white12),
+                      ),
                       focusedBorder: const UnderlineInputBorder(
-                          borderSide: BorderSide(color: Colors.white)),
+                        borderSide: BorderSide(color: Colors.white),
+                      ),
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -483,13 +534,16 @@ class _SocialScreenState extends State<SocialScreen>
                       height: 36,
                       color: Colors.white,
                       child: const Center(
-                        child: Text('ADD BUDDY',
-                            style: TextStyle(
-                                color: Colors.black,
-                                fontWeight: FontWeight.bold,
-                                letterSpacing: 2,
-                                fontFamily: 'monospace',
-                                fontSize: 11)),
+                        child: Text(
+                          'ADD BUDDY',
+                          style: TextStyle(
+                            color: Colors.black,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 2,
+                            fontFamily: 'monospace',
+                            fontSize: 11,
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -504,11 +558,11 @@ class _SocialScreenState extends State<SocialScreen>
 
   // ─────────────────────────────── GROUPS TAB ───────────────────────────────
   Widget _buildGroupsTab(Map<String, dynamic>? user) {
-    final currentGroupId =
-        user?['groupId']?['_id'] ?? user?['groupId'];
+    final currentGroupId = user?['groupId']?['_id'] ?? user?['groupId'];
     final currentUserId = user?['_id']?.toString();
     final creatorId = user?['groupId']?['creatorId']?.toString();
-    final isAdmin = currentUserId != null &&
+    final isAdmin =
+        currentUserId != null &&
         creatorId != null &&
         currentUserId == creatorId;
 
@@ -524,14 +578,19 @@ class _SocialScreenState extends State<SocialScreen>
               const Text(
                 'ACCOUNTABILITY ROOMS',
                 style: TextStyle(
-                    color: Colors.white,
-                    fontFamily: 'monospace',
-                    letterSpacing: 1.5,
-                    fontSize: 13,
-                    fontWeight: FontWeight.bold),
+                  color: Colors.white,
+                  fontFamily: 'monospace',
+                  letterSpacing: 1.5,
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               IconButton(
-                icon: const Icon(Icons.refresh, color: Colors.white30, size: 20),
+                icon: const Icon(
+                  Icons.refresh,
+                  color: Colors.white30,
+                  size: 20,
+                ),
                 onPressed: _fetchGroups,
               ),
             ],
@@ -542,18 +601,30 @@ class _SocialScreenState extends State<SocialScreen>
           TextField(
             controller: _groupSearchController,
             style: const TextStyle(
-                color: Colors.white, fontFamily: 'monospace', fontSize: 13),
+              color: Colors.white,
+              fontFamily: 'monospace',
+              fontSize: 13,
+            ),
             cursorColor: Colors.white,
             decoration: InputDecoration(
               hintText: 'SEARCH ROOMS…',
               hintStyle: TextStyle(
-                  color: Colors.grey[800], letterSpacing: 1.5, fontSize: 11),
-              prefixIcon:
-                  const Icon(Icons.search, color: Colors.white24, size: 18),
+                color: Colors.grey[800],
+                letterSpacing: 1.5,
+                fontSize: 11,
+              ),
+              prefixIcon: const Icon(
+                Icons.search,
+                color: Colors.white24,
+                size: 18,
+              ),
               suffixIcon: _groupSearchController.text.isNotEmpty
                   ? IconButton(
-                      icon: const Icon(Icons.close,
-                          color: Colors.white24, size: 16),
+                      icon: const Icon(
+                        Icons.close,
+                        color: Colors.white24,
+                        size: 16,
+                      ),
                       onPressed: () {
                         _groupSearchController.clear();
                         _fetchGroups();
@@ -561,9 +632,11 @@ class _SocialScreenState extends State<SocialScreen>
                     )
                   : null,
               enabledBorder: const UnderlineInputBorder(
-                  borderSide: BorderSide(color: Colors.white12)),
+                borderSide: BorderSide(color: Colors.white12),
+              ),
               focusedBorder: const UnderlineInputBorder(
-                  borderSide: BorderSide(color: Colors.white38)),
+                borderSide: BorderSide(color: Colors.white38),
+              ),
             ),
             onChanged: _onGroupSearchChanged,
           ),
@@ -574,186 +647,208 @@ class _SocialScreenState extends State<SocialScreen>
             child: _loadingGroups
                 ? const Center(
                     child: CircularProgressIndicator(
-                        color: Colors.white, strokeWidth: 1.5))
+                      color: Colors.white,
+                      strokeWidth: 1.5,
+                    ),
+                  )
                 : _groups.isEmpty
-                    ? Center(
-                        child: Text(
-                          _isGroupSearch
-                              ? 'No rooms match your search.'
-                              : 'No public focus rooms available.',
-                          style: TextStyle(
-                              color: Colors.grey[700],
-                              fontFamily: 'monospace'),
-                        ),
-                      )
-                    : ListView.separated(
-                        itemCount: _groups.length,
-                        separatorBuilder: (_, __) =>
-                            const Divider(color: Colors.white10),
-                        itemBuilder: (_, i) {
-                          final gp = _groups[i];
-                          final id = gp['_id']?.toString() ?? '';
-                          final name = gp['groupName'] ?? 'Focus Crew';
-                          final cat = gp['category'] ?? 'General';
-                          final members = gp['memberCount'] ?? 0;
-                          final isJoined =
-                              currentGroupId?.toString() == id;
+                ? Center(
+                    child: Text(
+                      _isGroupSearch
+                          ? 'No rooms match your search.'
+                          : 'No public focus rooms available.',
+                      style: TextStyle(
+                        color: Colors.grey[700],
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  )
+                : ListView.separated(
+                    itemCount: _groups.length,
+                    separatorBuilder: (_, __) =>
+                        const Divider(color: Colors.white10),
+                    itemBuilder: (_, i) {
+                      final gp = _groups[i];
+                      final id = gp['_id']?.toString() ?? '';
+                      final name = gp['groupName'] ?? 'Focus Crew';
+                      final cat = gp['category'] ?? 'General';
+                      final members = gp['memberCount'] ?? 0;
+                      final isJoined = currentGroupId?.toString() == id;
 
-                          return GestureDetector(
-                            onTap: isJoined
-                                ? () => _openGroupMembers(
-                                    id,
-                                    name.toString(),
-                                    currentUserId,
-                                    isAdmin)
-                                : null,
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                  vertical: 8.0),
-                              child: Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
+                      return GestureDetector(
+                        onTap: isJoined
+                            ? () => _openGroupMembers(
+                                id,
+                                name.toString(),
+                                currentUserId,
+                                isAdmin,
+                              )
+                            : null,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8.0),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
                                       children: [
-                                        Row(
-                                          children: [
-                                            Text(
-                                              name.toString().toUpperCase(),
-                                              style: TextStyle(
-                                                color: isJoined
-                                                    ? Colors.white
-                                                    : Colors.grey[400],
-                                                fontWeight: FontWeight.bold,
-                                                fontFamily: 'monospace',
-                                                fontSize: 14,
-                                              ),
-                                            ),
-                                            if (isJoined) ...[
-                                              const SizedBox(width: 8),
-                                              const Icon(
-                                                  Icons.people_outline,
-                                                  color: Colors.white24,
-                                                  size: 14),
-                                            ]
-                                          ],
-                                        ),
-                                        const SizedBox(height: 3),
                                         Text(
-                                          '${cat.toString().toUpperCase()}  ·  $members/50',
+                                          name.toString().toUpperCase(),
                                           style: TextStyle(
-                                              color: Colors.grey[700],
-                                              fontSize: 10,
-                                              fontFamily: 'monospace',
-                                              letterSpacing: 1),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  isJoined
-                                      ? Container(
-                                          padding: const EdgeInsets.symmetric(
-                                              vertical: 4, horizontal: 12),
-                                          decoration: BoxDecoration(
-                                              border: Border.all(
-                                                  color: Colors.white54)),
-                                          child: const Text('ACTIVE',
-                                              style: TextStyle(
-                                                  color: Colors.white,
-                                                  fontFamily: 'monospace',
-                                                  fontSize: 10)),
-                                        )
-                                      : GestureDetector(
-                                          onTap: members >= 50
-                                              ? null
-                                              : () => _joinGroup(id),
-                                          child: Container(
-                                            padding:
-                                                const EdgeInsets.symmetric(
-                                                    vertical: 4,
-                                                    horizontal: 12),
-                                            color: members >= 50
-                                                ? Colors.transparent
-                                                : Colors.white,
-                                            child: Text(
-                                              members >= 50 ? 'FULL' : 'JOIN',
-                                              style: TextStyle(
-                                                color: members >= 50
-                                                    ? Colors.grey[700]
-                                                    : Colors.black,
-                                                fontFamily: 'monospace',
-                                                fontSize: 10,
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                            ),
+                                            color: isJoined
+                                                ? Colors.white
+                                                : Colors.grey[400],
+                                            fontWeight: FontWeight.bold,
+                                            fontFamily: 'monospace',
+                                            fontSize: 14,
                                           ),
                                         ),
-                                ],
+                                        if (isJoined) ...[
+                                          const SizedBox(width: 8),
+                                          const Icon(
+                                            Icons.people_outline,
+                                            color: Colors.white24,
+                                            size: 14,
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                    const SizedBox(height: 3),
+                                    Text(
+                                      '${cat.toString().toUpperCase()}  ·  $members/50',
+                                      style: TextStyle(
+                                        color: Colors.grey[700],
+                                        fontSize: 10,
+                                        fontFamily: 'monospace',
+                                        letterSpacing: 1,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
-                            ),
-                          );
-                        },
-                      ),
+                              isJoined
+                                  ? Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 4,
+                                        horizontal: 12,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        border: Border.all(
+                                          color: Colors.white54,
+                                        ),
+                                      ),
+                                      child: const Text(
+                                        'ACTIVE',
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontFamily: 'monospace',
+                                          fontSize: 10,
+                                        ),
+                                      ),
+                                    )
+                                  : GestureDetector(
+                                      onTap: members >= 50
+                                          ? null
+                                          : () => _joinGroup(id),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          vertical: 4,
+                                          horizontal: 12,
+                                        ),
+                                        color: members >= 50
+                                            ? Colors.transparent
+                                            : Colors.white,
+                                        child: Text(
+                                          members >= 50 ? 'FULL' : 'JOIN',
+                                          style: TextStyle(
+                                            color: members >= 50
+                                                ? Colors.grey[700]
+                                                : Colors.black,
+                                            fontFamily: 'monospace',
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
           ),
 
           if (_groupError.isNotEmpty) ...[
-            Text(_groupError,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                    color: Colors.white38,
-                    fontSize: 12,
-                    fontFamily: 'monospace')),
+            Text(
+              _groupError,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Colors.white38,
+                fontSize: 12,
+                fontFamily: 'monospace',
+              ),
+            ),
             const SizedBox(height: 12),
           ],
 
           // ── Create room ──
           Container(
             padding: const EdgeInsets.all(16),
-            decoration:
-                BoxDecoration(border: Border.all(color: Colors.white12)),
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.white12),
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 TextField(
                   controller: _groupNameController,
                   style: const TextStyle(
-                      color: Colors.white,
-                      fontFamily: 'monospace',
-                      fontSize: 13),
+                    color: Colors.white,
+                    fontFamily: 'monospace',
+                    fontSize: 13,
+                  ),
                   cursorColor: Colors.white,
                   decoration: InputDecoration(
                     hintText: 'ROOM NAME',
                     hintStyle: TextStyle(
-                        color: Colors.grey[800],
-                        letterSpacing: 1.5,
-                        fontSize: 11),
+                      color: Colors.grey[800],
+                      letterSpacing: 1.5,
+                      fontSize: 11,
+                    ),
                     enabledBorder: const UnderlineInputBorder(
-                        borderSide: BorderSide(color: Colors.white12)),
+                      borderSide: BorderSide(color: Colors.white12),
+                    ),
                     focusedBorder: const UnderlineInputBorder(
-                        borderSide: BorderSide(color: Colors.white)),
+                      borderSide: BorderSide(color: Colors.white),
+                    ),
                   ),
                 ),
                 const SizedBox(height: 8),
                 TextField(
                   controller: _categoryController,
                   style: const TextStyle(
-                      color: Colors.white,
-                      fontFamily: 'monospace',
-                      fontSize: 13),
+                    color: Colors.white,
+                    fontFamily: 'monospace',
+                    fontSize: 13,
+                  ),
                   cursorColor: Colors.white,
                   decoration: InputDecoration(
                     hintText: 'CATEGORY (e.g. UPSC, GATE)',
                     hintStyle: TextStyle(
-                        color: Colors.grey[800],
-                        letterSpacing: 1.5,
-                        fontSize: 11),
+                      color: Colors.grey[800],
+                      letterSpacing: 1.5,
+                      fontSize: 11,
+                    ),
                     enabledBorder: const UnderlineInputBorder(
-                        borderSide: BorderSide(color: Colors.white12)),
+                      borderSide: BorderSide(color: Colors.white12),
+                    ),
                     focusedBorder: const UnderlineInputBorder(
-                        borderSide: BorderSide(color: Colors.white)),
+                      borderSide: BorderSide(color: Colors.white),
+                    ),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -763,13 +858,16 @@ class _SocialScreenState extends State<SocialScreen>
                     height: 36,
                     color: Colors.white,
                     child: const Center(
-                      child: Text('CREATE ROOM',
-                          style: TextStyle(
-                              color: Colors.black,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: 2,
-                              fontFamily: 'monospace',
-                              fontSize: 11)),
+                      child: Text(
+                        'CREATE ROOM',
+                        style: TextStyle(
+                          color: Colors.black,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 2,
+                          fontFamily: 'monospace',
+                          fontSize: 11,
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -808,9 +906,10 @@ class _SocialScreenState extends State<SocialScreen>
                           ? Colors.white
                           : Colors.transparent,
                       border: Border.all(
-                          color: _rankCategory == 'overall'
-                              ? Colors.white
-                              : Colors.white12),
+                        color: _rankCategory == 'overall'
+                            ? Colors.white
+                            : Colors.white12,
+                      ),
                     ),
                     child: Center(
                       child: Text(
@@ -845,9 +944,10 @@ class _SocialScreenState extends State<SocialScreen>
                           ? Colors.white
                           : Colors.transparent,
                       border: Border.all(
-                          color: _rankCategory == 'weekly'
-                              ? Colors.white
-                              : Colors.white12),
+                        color: _rankCategory == 'weekly'
+                            ? Colors.white
+                            : Colors.white12,
+                      ),
                     ),
                     child: Center(
                       child: Text(
@@ -870,7 +970,11 @@ class _SocialScreenState extends State<SocialScreen>
               IconButton(
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                icon: const Icon(Icons.refresh, color: Colors.white30, size: 20),
+                icon: const Icon(
+                  Icons.refresh,
+                  color: Colors.white30,
+                  size: 20,
+                ),
                 onPressed: _resetAndFetchRankings,
               ),
             ],
@@ -880,7 +984,10 @@ class _SocialScreenState extends State<SocialScreen>
             Text(
               _cacheTtlInfo,
               style: TextStyle(
-                  color: Colors.grey[700], fontSize: 10, fontFamily: 'monospace'),
+                color: Colors.grey[700],
+                fontSize: 10,
+                fontFamily: 'monospace',
+              ),
             ),
           ],
           const SizedBox(height: 12),
@@ -890,179 +997,187 @@ class _SocialScreenState extends State<SocialScreen>
             child: _loadingRankings
                 ? const Center(
                     child: CircularProgressIndicator(
-                        color: Colors.white, strokeWidth: 1.5))
+                      color: Colors.white,
+                      strokeWidth: 1.5,
+                    ),
+                  )
                 : _rankingsError.isNotEmpty
-                    ? Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(_rankingsError,
-                                style: const TextStyle(
-                                    color: Colors.white38,
-                                    fontFamily: 'monospace')),
-                            const SizedBox(height: 12),
-                            GestureDetector(
-                              onTap: _resetAndFetchRankings,
-                              child: const Text('RETRY',
-                                  style: TextStyle(
-                                      color: Colors.white,
-                                      fontFamily: 'monospace',
-                                      fontSize: 12,
-                                      letterSpacing: 1.5,
-                                      decoration: TextDecoration.underline)),
-                            ),
-                          ],
+                ? Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          _rankingsError,
+                          style: const TextStyle(
+                            color: Colors.white38,
+                            fontFamily: 'monospace',
+                          ),
                         ),
-                      )
-                    : _rankings.isEmpty
-                        ? Center(
-                            child: Text('No rankings yet.',
-                                style: TextStyle(
-                                    color: Colors.grey[700],
-                                    fontFamily: 'monospace')),
-                          )
-                        : ListView.separated(
-                            controller: _rankScrollCtrl,
-                            itemCount: _rankings.length +
-                                (_loadingMoreRankings ? 1 : 0) +
-                                (!_hasMoreRankings && _rankings.isNotEmpty
-                                    ? 1
-                                    : 0),
-                            separatorBuilder: (_, __) =>
-                                const Divider(color: Colors.white10),
-                            itemBuilder: (_, index) {
-                              if (index == _rankings.length) {
-                                return _loadingMoreRankings
-                                    ? const Padding(
-                                        padding: EdgeInsets.all(16),
-                                        child: Center(
-                                          child: CircularProgressIndicator(
-                                              color: Colors.white,
-                                              strokeWidth: 1.5),
-                                        ),
-                                      )
-                                    : Padding(
-                                        padding: const EdgeInsets.all(16),
-                                        child: Center(
-                                          child: Text(
-                                            '— END OF LIST —',
-                                            style: TextStyle(
-                                                color: Colors.grey[800],
-                                                fontFamily: 'monospace',
-                                                fontSize: 10,
-                                                letterSpacing: 1.5),
-                                          ),
-                                        ),
-                                      );
-                              }
+                        const SizedBox(height: 12),
+                        GestureDetector(
+                          onTap: _resetAndFetchRankings,
+                          child: const Text(
+                            'RETRY',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontFamily: 'monospace',
+                              fontSize: 12,
+                              letterSpacing: 1.5,
+                              decoration: TextDecoration.underline,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                : _rankings.isEmpty
+                ? Center(
+                    child: Text(
+                      'No rankings yet.',
+                      style: TextStyle(
+                        color: Colors.grey[700],
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  )
+                : ListView.separated(
+                    controller: _rankScrollCtrl,
+                    itemCount:
+                        _rankings.length +
+                        (_loadingMoreRankings ? 1 : 0) +
+                        (!_hasMoreRankings && _rankings.isNotEmpty ? 1 : 0),
+                    separatorBuilder: (_, __) =>
+                        const Divider(color: Colors.white10),
+                    itemBuilder: (_, index) {
+                      if (index == _rankings.length) {
+                        return _loadingMoreRankings
+                            ? const Padding(
+                                padding: EdgeInsets.all(16),
+                                child: Center(
+                                  child: CircularProgressIndicator(
+                                    color: Colors.white,
+                                    strokeWidth: 1.5,
+                                  ),
+                                ),
+                              )
+                            : Padding(
+                                padding: const EdgeInsets.all(16),
+                                child: Center(
+                                  child: Text(
+                                    '— END OF LIST —',
+                                    style: TextStyle(
+                                      color: Colors.grey[800],
+                                      fontFamily: 'monospace',
+                                      fontSize: 10,
+                                      letterSpacing: 1.5,
+                                    ),
+                                  ),
+                                ),
+                              );
+                      }
 
-                              final item = _rankings[index];
-                              final rank = index + 1;
-                              final name = item['name'] ?? 'User';
-                              final goal = item['targetGoal'] ?? '';
-                              final score = item['globalScore'] ?? 0;
-                              final itemId =
-                                  item['_id']?.toString();
-                              final isMe = itemId != null && itemId == myId;
+                      final item = _rankings[index];
+                      final rank = index + 1;
+                      final name = item['name'] ?? 'User';
+                      final goal = item['targetGoal'] ?? '';
+                      final score = item['globalScore'] ?? 0;
+                      final itemId = item['_id']?.toString();
+                      final isMe = itemId != null && itemId == myId;
 
-                              final rankColor = rank == 1
-                                  ? const Color(0xFFFFD700)
-                                  : rank == 2
-                                      ? const Color(0xFFC0C0C0)
-                                      : rank == 3
-                                          ? const Color(0xFFCD7F32)
-                                          : (isMe
-                                              ? Colors.white
-                                              : Colors.grey[800]!);
+                      final rankColor = rank == 1
+                          ? const Color(0xFFFFD700)
+                          : rank == 2
+                          ? const Color(0xFFC0C0C0)
+                          : rank == 3
+                          ? const Color(0xFFCD7F32)
+                          : (isMe ? Colors.white : Colors.grey[800]!);
 
-                              return Container(
-                                color: isMe
-                                    ? Colors.white.withOpacity(0.04)
-                                    : Colors.transparent,
-                                padding: const EdgeInsets.symmetric(
-                                    vertical: 10.0),
-                                child: Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
+                      return Container(
+                        color: isMe
+                            ? Colors.white.withOpacity(0.04)
+                            : Colors.transparent,
+                        padding: const EdgeInsets.symmetric(vertical: 10.0),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Row(
+                              children: [
+                                SizedBox(
+                                  width: 38,
+                                  child: Text(
+                                    '#${rank.toString().padLeft(2, '0')}',
+                                    style: TextStyle(
+                                      color: rankColor,
+                                      fontWeight: FontWeight.bold,
+                                      fontFamily: 'monospace',
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ),
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Row(
                                       children: [
-                                        SizedBox(
-                                          width: 38,
-                                          child: Text(
-                                            '#${rank.toString().padLeft(2, '0')}',
-                                            style: TextStyle(
-                                              color: rankColor,
-                                              fontWeight: FontWeight.bold,
-                                              fontFamily: 'monospace',
-                                              fontSize: 13,
-                                            ),
+                                        Text(
+                                          name.toString().toUpperCase(),
+                                          style: TextStyle(
+                                            color: isMe
+                                                ? Colors.white
+                                                : Colors.grey[300],
+                                            fontFamily: 'monospace',
+                                            fontSize: 13,
+                                            fontWeight: isMe
+                                                ? FontWeight.bold
+                                                : FontWeight.normal,
                                           ),
                                         ),
-                                        Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Row(
-                                              children: [
-                                                Text(
-                                                  name.toString().toUpperCase(),
-                                                  style: TextStyle(
-                                                    color: isMe
-                                                        ? Colors.white
-                                                        : Colors.grey[300],
-                                                    fontFamily: 'monospace',
-                                                    fontSize: 13,
-                                                    fontWeight: isMe
-                                                        ? FontWeight.bold
-                                                        : FontWeight.normal,
-                                                  ),
-                                                ),
-                                                if (isMe) ...[
-                                                  const SizedBox(width: 6),
-                                                  const Text('YOU',
-                                                      style: TextStyle(
-                                                          color: Colors.white38,
-                                                          fontFamily:
-                                                              'monospace',
-                                                          fontSize: 9,
-                                                          letterSpacing: 1)),
-                                                ],
-                                              ],
+                                        if (isMe) ...[
+                                          const SizedBox(width: 6),
+                                          const Text(
+                                            'YOU',
+                                            style: TextStyle(
+                                              color: Colors.white38,
+                                              fontFamily: 'monospace',
+                                              fontSize: 9,
+                                              letterSpacing: 1,
                                             ),
-                                            if (goal.toString().isNotEmpty) ...[
-                                              const SizedBox(height: 2),
-                                              Text(
-                                                goal.toString().toUpperCase(),
-                                                style: TextStyle(
-                                                    color: Colors.grey[700],
-                                                    fontSize: 9,
-                                                    fontFamily: 'monospace',
-                                                    letterSpacing: 1),
-                                              ),
-                                            ],
-                                          ],
-                                        ),
+                                          ),
+                                        ],
                                       ],
                                     ),
-                                    Text(
-                                      'PTS: $score',
-                                      style: TextStyle(
-                                        color: isMe
-                                            ? Colors.white
-                                            : Colors.grey[600],
-                                        fontSize: 11,
-                                        fontFamily: 'monospace',
-                                        fontWeight: isMe
-                                            ? FontWeight.bold
-                                            : FontWeight.normal,
+                                    if (goal.toString().isNotEmpty) ...[
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        goal.toString().toUpperCase(),
+                                        style: TextStyle(
+                                          color: Colors.grey[700],
+                                          fontSize: 9,
+                                          fontFamily: 'monospace',
+                                          letterSpacing: 1,
+                                        ),
                                       ),
-                                    ),
+                                    ],
                                   ],
                                 ),
-                              );
-                            },
-                          ),
+                              ],
+                            ),
+                            Text(
+                              'PTS: $score',
+                              style: TextStyle(
+                                color: isMe ? Colors.white : Colors.grey[600],
+                                fontSize: 11,
+                                fontFamily: 'monospace',
+                                fontWeight: isMe
+                                    ? FontWeight.bold
+                                    : FontWeight.normal,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
           ),
         ],
       ),
@@ -1117,19 +1232,26 @@ class _MembersSheetState extends State<_MembersSheet> {
     try {
       final res = await ApiService.removeGroupMember(targetUserId);
       if (res['message'] != null) {
-        setState(() => _members.removeWhere(
-            (m) => m['_id']?.toString() == targetUserId));
+        setState(
+          () =>
+              _members.removeWhere((m) => m['_id']?.toString() == targetUserId),
+        );
         widget.onEvict?.call();
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          backgroundColor: Colors.black,
-          content: Text(
-            e.toString().replaceAll('Exception: ', ''),
-            style: const TextStyle(color: Colors.white38, fontFamily: 'monospace'),
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: Colors.black,
+            content: Text(
+              e.toString().replaceAll('Exception: ', ''),
+              style: const TextStyle(
+                color: Colors.white38,
+                fontFamily: 'monospace',
+              ),
+            ),
           ),
-        ));
+        );
       }
     } finally {
       setState(() => _evictingId = null);
@@ -1149,8 +1271,8 @@ class _MembersSheetState extends State<_MembersSheet> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Center(
-                child: Container(
-                    width: 36, height: 2, color: Colors.white24)),
+              child: Container(width: 36, height: 2, color: Colors.white24),
+            ),
             const SizedBox(height: 16),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1171,26 +1293,32 @@ class _MembersSheetState extends State<_MembersSheet> {
                     Text(
                       'MEMBERS RANKED BY FOCUS',
                       style: TextStyle(
-                          color: Colors.grey[700],
-                          fontFamily: 'monospace',
-                          fontSize: 9,
-                          letterSpacing: 1),
+                        color: Colors.grey[700],
+                        fontFamily: 'monospace',
+                        fontSize: 9,
+                        letterSpacing: 1,
+                      ),
                     ),
                   ],
                 ),
                 if (widget.isAdmin)
                   Container(
                     padding: const EdgeInsets.symmetric(
-                        vertical: 2, horizontal: 6),
+                      vertical: 2,
+                      horizontal: 6,
+                    ),
                     decoration: BoxDecoration(
-                        border:
-                            Border.all(color: Colors.white24)),
-                    child: const Text('ADMIN',
-                        style: TextStyle(
-                            color: Colors.white54,
-                            fontFamily: 'monospace',
-                            fontSize: 9,
-                            letterSpacing: 1)),
+                      border: Border.all(color: Colors.white24),
+                    ),
+                    child: const Text(
+                      'ADMIN',
+                      style: TextStyle(
+                        color: Colors.white54,
+                        fontFamily: 'monospace',
+                        fontSize: 9,
+                        letterSpacing: 1,
+                      ),
+                    ),
                   ),
               ],
             ),
@@ -1200,133 +1328,133 @@ class _MembersSheetState extends State<_MembersSheet> {
               child: _loading
                   ? const Center(
                       child: CircularProgressIndicator(
-                          color: Colors.white, strokeWidth: 1.5))
+                        color: Colors.white,
+                        strokeWidth: 1.5,
+                      ),
+                    )
                   : _error.isNotEmpty
-                      ? Center(
-                          child: Text(_error,
-                              style: const TextStyle(
-                                  color: Colors.white38,
-                                  fontFamily: 'monospace')))
-                      : _members.isEmpty
-                          ? Center(
-                              child: Text('No members found.',
-                                  style: TextStyle(
-                                      color: Colors.grey[700],
-                                      fontFamily: 'monospace')))
-                          : ListView.separated(
-                              controller: scrollCtrl,
-                              itemCount: _members.length,
-                              separatorBuilder: (_, __) =>
-                                  const Divider(color: Colors.white10),
-                              itemBuilder: (_, i) {
-                                final m = _members[i];
-                                final memberId =
-                                    m['_id']?.toString() ?? '';
-                                final name = m['name'] ?? 'Member';
-                                final score = m['globalScore'] ?? 0;
-                                final rank = i + 1;
-                                final isMe =
-                                    memberId == widget.currentUserId;
-                                final isEvicting =
-                                    _evictingId == memberId;
+                  ? Center(
+                      child: Text(
+                        _error,
+                        style: const TextStyle(
+                          color: Colors.white38,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                    )
+                  : _members.isEmpty
+                  ? Center(
+                      child: Text(
+                        'No members found.',
+                        style: TextStyle(
+                          color: Colors.grey[700],
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                    )
+                  : ListView.separated(
+                      controller: scrollCtrl,
+                      itemCount: _members.length,
+                      separatorBuilder: (_, __) =>
+                          const Divider(color: Colors.white10),
+                      itemBuilder: (_, i) {
+                        final m = _members[i];
+                        final memberId = m['_id']?.toString() ?? '';
+                        final name = m['name'] ?? 'Member';
+                        final score = m['globalScore'] ?? 0;
+                        final rank = i + 1;
+                        final isMe = memberId == widget.currentUserId;
+                        final isEvicting = _evictingId == memberId;
 
-                                return Padding(
-                                  padding:
-                                      const EdgeInsets.symmetric(
-                                          vertical: 10.0),
-                                  child: Row(
-                                    mainAxisAlignment:
-                                        MainAxisAlignment.spaceBetween,
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 10.0),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Row(
+                                children: [
+                                  Text(
+                                    '#$rank',
+                                    style: TextStyle(
+                                      color: rank <= 3
+                                          ? Colors.white
+                                          : Colors.grey[700],
+                                      fontFamily: 'monospace',
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 14),
+                                  Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
-                                      Row(
-                                        children: [
-                                          Text(
-                                            '#$rank',
-                                            style: TextStyle(
-                                              color: rank <= 3
-                                                  ? Colors.white
-                                                  : Colors.grey[700],
-                                              fontFamily: 'monospace',
-                                              fontSize: 12,
-                                              fontWeight:
-                                                  FontWeight.bold,
-                                            ),
-                                          ),
-                                          const SizedBox(width: 14),
-                                          Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment
-                                                    .start,
-                                            children: [
-                                              Text(
-                                                name.toString().toUpperCase(),
-                                                style: TextStyle(
-                                                  color: isMe
-                                                      ? Colors.white
-                                                      : Colors.grey[400],
-                                                  fontFamily: 'monospace',
-                                                  fontSize: 13,
-                                                  fontWeight: isMe
-                                                      ? FontWeight.bold
-                                                      : FontWeight.normal,
-                                                ),
-                                              ),
-                                              Text(
-                                                'PTS: $score',
-                                                style: const TextStyle(
-                                                    color: Colors.white24,
-                                                    fontFamily:
-                                                        'monospace',
-                                                    fontSize: 10),
-                                              ),
-                                            ],
-                                          ),
-                                        ],
-                                      ),
-                                      // Admin evict button
-                                      if (widget.isAdmin &&
-                                          !isMe)
-                                        GestureDetector(
-                                          onTap: isEvicting
-                                              ? null
-                                              : () => _evict(
-                                                  memberId,
-                                                  name.toString()),
-                                          child: Container(
-                                            padding:
-                                                const EdgeInsets.symmetric(
-                                                    vertical: 4,
-                                                    horizontal: 10),
-                                            decoration: BoxDecoration(
-                                                border: Border.all(
-                                                    color: Colors.red
-                                                        .withOpacity(
-                                                            0.4))),
-                                            child: isEvicting
-                                                ? const SizedBox(
-                                                    width: 14,
-                                                    height: 14,
-                                                    child:
-                                                        CircularProgressIndicator(
-                                                      color: Colors.red,
-                                                      strokeWidth: 1.5,
-                                                    ),
-                                                  )
-                                                : const Text('EVICT',
-                                                    style: TextStyle(
-                                                        color: Colors.red,
-                                                        fontFamily:
-                                                            'monospace',
-                                                        fontSize: 10,
-                                                        letterSpacing:
-                                                            1)),
-                                          ),
+                                      Text(
+                                        name.toString().toUpperCase(),
+                                        style: TextStyle(
+                                          color: isMe
+                                              ? Colors.white
+                                              : Colors.grey[400],
+                                          fontFamily: 'monospace',
+                                          fontSize: 13,
+                                          fontWeight: isMe
+                                              ? FontWeight.bold
+                                              : FontWeight.normal,
                                         ),
+                                      ),
+                                      Text(
+                                        'PTS: $score',
+                                        style: const TextStyle(
+                                          color: Colors.white24,
+                                          fontFamily: 'monospace',
+                                          fontSize: 10,
+                                        ),
+                                      ),
                                     ],
                                   ),
-                                );
-                              },
-                            ),
+                                ],
+                              ),
+                              // Admin evict button
+                              if (widget.isAdmin && !isMe)
+                                GestureDetector(
+                                  onTap: isEvicting
+                                      ? null
+                                      : () => _evict(memberId, name.toString()),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 4,
+                                      horizontal: 10,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      border: Border.all(
+                                        color: Colors.red.withOpacity(0.4),
+                                      ),
+                                    ),
+                                    child: isEvicting
+                                        ? const SizedBox(
+                                            width: 14,
+                                            height: 14,
+                                            child: CircularProgressIndicator(
+                                              color: Colors.red,
+                                              strokeWidth: 1.5,
+                                            ),
+                                          )
+                                        : const Text(
+                                            'EVICT',
+                                            style: TextStyle(
+                                              color: Colors.red,
+                                              fontFamily: 'monospace',
+                                              fontSize: 10,
+                                              letterSpacing: 1,
+                                            ),
+                                          ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
             ),
           ],
         ),

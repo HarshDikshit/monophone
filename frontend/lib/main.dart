@@ -7,6 +7,7 @@ import 'screens/parent_screen.dart';
 import 'screens/pomodoro_screen.dart';
 import 'screens/social_screen.dart';
 import 'screens/focustube_blocker_screen.dart';
+import 'screens/day_planner_screen.dart';
 import 'services/blocker_service.dart';
 import 'services/launcher_state.dart';
 import 'services/offline_sync_service.dart';
@@ -99,6 +100,7 @@ class MyApp extends StatelessWidget {
         '/social': (context) => const SocialScreen(),
         '/parent': (context) => const ParentScreen(),
         '/blocker': (context) => const FocusTubeBlockerScreen(),
+        '/planner': (context) => const DayPlannerScreen(),
       },
     );
   }

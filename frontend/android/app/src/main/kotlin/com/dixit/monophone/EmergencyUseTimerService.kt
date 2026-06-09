@@ -83,6 +83,11 @@ class EmergencyUseTimerService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == "CANCEL_EMERGENCY") {
+            cancelEmergency()
+            return START_NOT_STICKY
+        }
+
         targetPackage = intent?.getStringExtra("packageName") ?: ""
         totalDurationMs = intent?.getLongExtra("durationMs", 5 * 60 * 1000L) ?: 5 * 60 * 1000L
         blockReason = intent?.getStringExtra("blockReason") ?: "Emergency use"

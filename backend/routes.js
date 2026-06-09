@@ -15,11 +15,60 @@ const MIN_SUPPORTED_VERSION = process.env.APP_MIN_SUPPORTED_VERSION || "0.9.0";
 const RELEASE_NOTES =
   process.env.APP_RELEASE_NOTES || "Bug fixes and performance improvements.";
 
-// Redis-style in-memory cache (replace with ioredis in prod).
-// Used to avoid hammering MongoDB for analytics queries.
+const Redis = require("ioredis");
+
+// Initialize Redis client
+const REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379";
+let redisClient = null;
+let isRedisConnected = false;
+
+try {
+  redisClient = new Redis(REDIS_URL, {
+    maxRetriesPerRequest: 1,
+    connectTimeout: 2000,
+    lazyConnect: true
+  });
+
+  redisClient.on("connect", () => {
+    console.log("Redis connected successfully.");
+    isRedisConnected = true;
+  });
+
+  redisClient.on("error", (err) => {
+    console.error("Redis error:", err.message);
+    isRedisConnected = false;
+  });
+
+  redisClient.on("end", () => {
+    isRedisConnected = false;
+  });
+
+  redisClient.connect().catch(err => {
+    console.error("Redis connection failed, using in-memory fallback:", err.message);
+    isRedisConnected = false;
+  });
+} catch (error) {
+  console.error("Failed to initialize Redis client:", error.message);
+  isRedisConnected = false;
+}
+
+// In-memory fallback cache
 const analyticsCache = new Map();
 const CACHE_TTL_MS = 60 * 1000;
-function getCached(key) {
+
+async function getCached(key) {
+  if (isRedisConnected && redisClient) {
+    try {
+      const data = await redisClient.get(key);
+      if (data) {
+        return JSON.parse(data);
+      }
+      return null;
+    } catch (err) {
+      console.error("Redis getCached error, falling back to memory:", err.message);
+    }
+  }
+
   const entry = analyticsCache.get(key);
   if (!entry) return null;
   if (Date.now() - entry.timestamp > CACHE_TTL_MS) {
@@ -28,16 +77,48 @@ function getCached(key) {
   }
   return entry.data;
 }
-function setCached(key, data) {
+
+async function setCached(key, data) {
+  const ttlSeconds = 60;
+  if (isRedisConnected && redisClient) {
+    try {
+      await redisClient.set(key, JSON.stringify(data), "EX", ttlSeconds);
+      return;
+    } catch (err) {
+      console.error("Redis setCached error, falling back to memory:", err.message);
+    }
+  }
+
   analyticsCache.set(key, { timestamp: Date.now(), data });
   if (analyticsCache.size > 1000) {
     const firstKey = analyticsCache.keys().next().value;
     analyticsCache.delete(firstKey);
   }
 }
-function invalidateUserAnalytics(userId) {
+
+async function invalidateUserAnalytics(userId) {
+  if (isRedisConnected && redisClient) {
+    try {
+      const pattern = `analytics:${userId}:*`;
+      let cursor = "0";
+      do {
+        const res = await redisClient.scan(cursor, "MATCH", pattern, "COUNT", 100);
+        cursor = res[0];
+        const keys = res[1];
+        if (keys.length > 0) {
+          await redisClient.del(...keys);
+        }
+      } while (cursor !== "0");
+      return;
+    } catch (err) {
+      console.error("Redis invalidateUserAnalytics error, falling back to memory:", err.message);
+    }
+  }
+
   for (const k of analyticsCache.keys()) {
-    if (k.startsWith(`analytics:${userId}`)) analyticsCache.delete(k);
+    if (k.startsWith(`analytics:${userId}`)) {
+      analyticsCache.delete(k);
+    }
   }
 }
 
@@ -508,7 +589,7 @@ router.post("/activity/batch-sync", authenticateToken, async (req, res) => {
     });
 
     // Invalidate analytics cache so the next /analytics fetch returns fresh data.
-    invalidateUserAnalytics(req.user.id);
+    await invalidateUserAnalytics(req.user.id);
 
     res.json({
       success: true,
@@ -531,7 +612,7 @@ router.get("/analytics", authenticateToken, async (req, res) => {
     const daysBack = parseInt(req.query.days) || 30;
     const cacheKey = `analytics:${req.user.id}:${daysBack}`;
 
-    const cached = getCached(cacheKey);
+    const cached = await getCached(cacheKey);
     if (cached) {
       return res.json({ ...cached, _fromCache: true });
     }
@@ -662,7 +743,7 @@ router.get("/analytics", authenticateToken, async (req, res) => {
       fromCache: false,
     };
 
-    setCached(cacheKey, response);
+    await setCached(cacheKey, response);
     res.json(response);
   } catch (error) {
     res.status(500).json({ message: error.message });

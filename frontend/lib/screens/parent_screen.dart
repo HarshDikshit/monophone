@@ -5,6 +5,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
 import '../services/launcher_state.dart';
+import '../services/auth_guard.dart';
 
 class ParentScreen extends StatefulWidget {
   const ParentScreen({super.key});
@@ -31,15 +32,11 @@ class _ParentScreenState extends State<ParentScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _loadInitialData();
-    });
+    _checkAuthThenLoad();
   }
 
-  @override
-  void dispose() {
-    _codeController.dispose();
-    super.dispose();
+  Future<void> _checkAuthThenLoad() async {
+    await requireAuth(context, onAuthenticated: _loadInitialData);
   }
 
   Future<void> _loadInitialData() async {
@@ -89,7 +86,7 @@ class _ParentScreenState extends State<ParentScreen> {
     // Let's check: our parent report api is `/api/parent/reports/:studentId`.
     // If the parent has paired, we can save the linkedStudentId in SharedPreferences, so we can fetch reports for that student.
     // Let's write that logic. It's clean, efficient, and robust!
-    
+
     setState(() {
       _loadingReports = true;
       _message = '';
@@ -113,7 +110,8 @@ class _ParentScreenState extends State<ParentScreen> {
       }
     } catch (e) {
       setState(() {
-        _message = 'Error loading student reports: ${e.toString().replaceAll('Exception: ', '')}';
+        _message =
+            'Error loading student reports: ${e.toString().replaceAll('Exception: ', '')}';
       });
     } finally {
       setState(() {
@@ -163,12 +161,12 @@ class _ParentScreenState extends State<ParentScreen> {
         final studentId = res['student']['id'];
         final prefsInst = await SharedPreferences.getInstance();
         await prefsInst.setString('linked_student_id', studentId);
-        
+
         setState(() {
           _message = 'Successfully paired with ${res['student']['name']}!';
           _codeController.clear();
         });
-        
+
         // Refresh reports
         await _fetchLinkedStudentReports();
       } else {
@@ -212,7 +210,10 @@ class _ParentScreenState extends State<ParentScreen> {
     buffer.writeln('===================================');
     buffer.writeln('Generated via Focus Study Launcher.');
 
-    Share.share(buffer.toString(), subject: 'Weekly Focus Report for $studentName');
+    Share.share(
+      buffer.toString(),
+      subject: 'Weekly Focus Report for $studentName',
+    );
   }
 
   String _formatSeconds(int seconds) {
@@ -315,8 +316,14 @@ class _ParentScreenState extends State<ParentScreen> {
                   data: _pairingCode,
                   version: QrVersions.auto,
                   size: 160.0,
-                  eyeStyle: const QrEyeStyle(eyeShape: QrEyeShape.square, color: Colors.white),
-                  dataModuleStyle: const QrDataModuleStyle(dataModuleShape: QrDataModuleShape.square, color: Colors.white),
+                  eyeStyle: const QrEyeStyle(
+                    eyeShape: QrEyeShape.square,
+                    color: Colors.white,
+                  ),
+                  dataModuleStyle: const QrDataModuleStyle(
+                    dataModuleShape: QrDataModuleShape.square,
+                    color: Colors.white,
+                  ),
                   gapless: false,
                 ),
               ],
@@ -329,7 +336,11 @@ class _ParentScreenState extends State<ParentScreen> {
           Text(
             _message,
             textAlign: TextAlign.center,
-            style: const TextStyle(color: Colors.white54, fontFamily: 'monospace', fontSize: 13),
+            style: const TextStyle(
+              color: Colors.white54,
+              fontFamily: 'monospace',
+              fontSize: 13,
+            ),
           ),
           const SizedBox(height: 16),
         ],
@@ -337,12 +348,13 @@ class _ParentScreenState extends State<ParentScreen> {
           onTap: _generatingCode ? null : _generateCode,
           child: Container(
             height: 50,
-            decoration: BoxDecoration(
-              border: Border.all(color: Colors.white),
-            ),
+            decoration: BoxDecoration(border: Border.all(color: Colors.white)),
             child: Center(
               child: _generatingCode
-                  ? const CircularProgressIndicator(color: Colors.white, strokeWidth: 2)
+                  ? const CircularProgressIndicator(
+                      color: Colors.white,
+                      strokeWidth: 2,
+                    )
                   : const Text(
                       'GENERATE PAIRING CODE',
                       style: TextStyle(
@@ -411,82 +423,95 @@ class _ParentScreenState extends State<ParentScreen> {
           const SizedBox(height: 16),
           Expanded(
             child: _loadingReports
-                ? const Center(child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                ? const Center(
+                    child: CircularProgressIndicator(
+                      color: Colors.white,
+                      strokeWidth: 2,
+                    ),
+                  )
                 : _reports.isEmpty
-                    ? Center(
-                        child: Text(
-                          'No reports synced yet.',
-                          style: TextStyle(color: Colors.grey[700], fontFamily: 'monospace'),
-                        ),
-                      )
-                    : ListView.separated(
-                        itemCount: _reports.length,
-                        separatorBuilder: (context, index) => const Divider(color: Colors.white10),
-                        itemBuilder: (context, index) {
-                          final act = _reports[index];
-                          final date = act['date'] ?? '';
-                          final studySec = act['totalStudySeconds'] ?? 0;
-                          final distractSec = act['totalDistractedSeconds'] ?? 0;
-                          final streak = act['streakMaintained'] ?? false;
+                ? Center(
+                    child: Text(
+                      'No reports synced yet.',
+                      style: TextStyle(
+                        color: Colors.grey[700],
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  )
+                : ListView.separated(
+                    itemCount: _reports.length,
+                    separatorBuilder: (context, index) =>
+                        const Divider(color: Colors.white10),
+                    itemBuilder: (context, index) {
+                      final act = _reports[index];
+                      final date = act['date'] ?? '';
+                      final studySec = act['totalStudySeconds'] ?? 0;
+                      final distractSec = act['totalDistractedSeconds'] ?? 0;
+                      final streak = act['streakMaintained'] ?? false;
 
-                          return Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 8.0),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8.0),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  date,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 14,
+                                    fontFamily: 'monospace',
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  streak
+                                      ? '⚡ STREAK MAINTAINED'
+                                      : '🛑 FOCUS TARGET MISSED',
+                                  style: TextStyle(
+                                    color: streak
+                                        ? Colors.white38
+                                        : Colors.grey[800],
+                                    fontSize: 10,
+                                    fontFamily: 'monospace',
+                                    letterSpacing: 1,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            Row(
                               children: [
                                 Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  crossAxisAlignment: CrossAxisAlignment.end,
                                   children: [
                                     Text(
-                                      date,
+                                      'STUDY: ${_formatSeconds(studySec)}',
                                       style: const TextStyle(
                                         color: Colors.white,
-                                        fontSize: 14,
+                                        fontSize: 12,
                                         fontFamily: 'monospace',
                                       ),
                                     ),
-                                    const SizedBox(height: 2),
                                     Text(
-                                      streak ? '⚡ STREAK MAINTAINED' : '🛑 FOCUS TARGET MISSED',
+                                      'DISTRACT: ${_formatSeconds(distractSec)}',
                                       style: TextStyle(
-                                        color: streak ? Colors.white38 : Colors.grey[800],
-                                        fontSize: 10,
+                                        color: Colors.grey[600],
+                                        fontSize: 11,
                                         fontFamily: 'monospace',
-                                        letterSpacing: 1,
                                       ),
                                     ),
                                   ],
                                 ),
-                                Row(
-                                  children: [
-                                    Column(
-                                      crossAxisAlignment: CrossAxisAlignment.end,
-                                      children: [
-                                        Text(
-                                          'STUDY: ${_formatSeconds(studySec)}',
-                                          style: const TextStyle(
-                                            color: Colors.white,
-                                            fontSize: 12,
-                                            fontFamily: 'monospace',
-                                          ),
-                                        ),
-                                        Text(
-                                          'DISTRACT: ${_formatSeconds(distractSec)}',
-                                          style: TextStyle(
-                                            color: Colors.grey[600],
-                                            fontSize: 11,
-                                            fontFamily: 'monospace',
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ],
-                                )
                               ],
                             ),
-                          );
-                        },
-                      ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
           ),
           const SizedBox(height: 16),
         ],
@@ -494,14 +519,14 @@ class _ParentScreenState extends State<ParentScreen> {
         // Pairing logic
         Container(
           padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            border: Border.all(color: Colors.white12),
-          ),
+          decoration: BoxDecoration(border: Border.all(color: Colors.white12)),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(
-                _linkedStudentInfo == null ? 'LINK STUDENT' : 'LINK ANOTHER STUDENT',
+                _linkedStudentInfo == null
+                    ? 'LINK STUDENT'
+                    : 'LINK ANOTHER STUDENT',
                 style: const TextStyle(
                   color: Colors.white70,
                   fontSize: 12,
@@ -513,11 +538,17 @@ class _ParentScreenState extends State<ParentScreen> {
               const SizedBox(height: 12),
               TextField(
                 controller: _codeController,
-                style: const TextStyle(color: Colors.white, fontFamily: 'monospace'),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontFamily: 'monospace',
+                ),
                 cursorColor: Colors.white,
                 decoration: InputDecoration(
                   hintText: 'ENTER 6-DIGIT CODE',
-                  hintStyle: TextStyle(color: Colors.grey[700], letterSpacing: 2),
+                  hintStyle: TextStyle(
+                    color: Colors.grey[700],
+                    letterSpacing: 2,
+                  ),
                   enabledBorder: const UnderlineInputBorder(
                     borderSide: BorderSide(color: Colors.white24),
                   ),
@@ -531,7 +562,11 @@ class _ParentScreenState extends State<ParentScreen> {
                 Text(
                   _message,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.white54, fontSize: 12, fontFamily: 'monospace'),
+                  style: const TextStyle(
+                    color: Colors.white54,
+                    fontSize: 12,
+                    fontFamily: 'monospace',
+                  ),
                 ),
                 const SizedBox(height: 16),
               ],
@@ -542,7 +577,10 @@ class _ParentScreenState extends State<ParentScreen> {
                   color: Colors.white,
                   child: Center(
                     child: _pairing
-                        ? const CircularProgressIndicator(color: Colors.black, strokeWidth: 2)
+                        ? const CircularProgressIndicator(
+                            color: Colors.black,
+                            strokeWidth: 2,
+                          )
                         : const Text(
                             'SUBMIT CODE',
                             style: TextStyle(

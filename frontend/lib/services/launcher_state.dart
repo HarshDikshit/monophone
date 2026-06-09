@@ -507,20 +507,66 @@ class LauncherState extends ChangeNotifier {
     if (_exitTime != null && _lastLaunchedPackage != null) {
       final now = DateTime.now();
       final elapsed = now.difference(_exitTime!).inSeconds;
-
-      if (_studyApps.contains(_lastLaunchedPackage)) {
-        _studySeconds += elapsed;
-        _attributeSecondsToTask(_activeTaskId, elapsed);
-      } else if (_distractionApps.contains(_lastLaunchedPackage)) {
-        _distractedSeconds += elapsed;
-      } else {
-        if (_isPomodoroActive && !_isBreak) {
-          _studySeconds += elapsed;
-          _attributeSecondsToTask(_activeTaskId, elapsed);
-        }
+      if (elapsed <= 0) {
+        _lastLaunchedPackage = null;
+        _exitTime = null;
+        return;
       }
 
-      await _saveLocalStats();
+      // Check if the day has crossed since the user left the launcher.
+      // If so, the elapsed time belongs to yesterday — save it there.
+      final exitDay = _exitTime!;
+      final sameDay =
+          exitDay.year == now.year &&
+          exitDay.month == now.month &&
+          exitDay.day == now.day;
+
+      if (sameDay) {
+        // Same day — add to today's stats
+        if (_studyApps.contains(_lastLaunchedPackage)) {
+          _studySeconds += elapsed;
+          _attributeSecondsToTask(_activeTaskId, elapsed);
+        } else if (_distractionApps.contains(_lastLaunchedPackage)) {
+          _distractedSeconds += elapsed;
+        } else {
+          if (_isPomodoroActive && !_isBreak) {
+            _studySeconds += elapsed;
+            _attributeSecondsToTask(_activeTaskId, elapsed);
+          }
+        }
+        await _saveLocalStats();
+      } else {
+        // Crossed midnight — save elapsed time to yesterday's storage key
+        final yesterdayStr =
+            '${exitDay.year}-${exitDay.month.toString().padLeft(2, '0')}-${exitDay.day.toString().padLeft(2, '0')}';
+        final prefs = await SharedPreferences.getInstance();
+        final prevStudy = prefs.getInt('study_seconds_$yesterdayStr') ?? 0;
+        final prevDistracted =
+            prefs.getInt('distracted_seconds_$yesterdayStr') ?? 0;
+
+        if (_studyApps.contains(_lastLaunchedPackage)) {
+          await prefs.setInt(
+            'study_seconds_$yesterdayStr',
+            prevStudy + elapsed,
+          );
+        } else if (_distractionApps.contains(_lastLaunchedPackage)) {
+          await prefs.setInt(
+            'distracted_seconds_$yesterdayStr',
+            prevDistracted + elapsed,
+          );
+        } else if (_isPomodoroActive && !_isBreak) {
+          await prefs.setInt(
+            'study_seconds_$yesterdayStr',
+            prevStudy + elapsed,
+          );
+        }
+
+        // Reload today's stats from storage after the cross-day adjustment
+        final todayStr = _todayKey();
+        _studySeconds = prefs.getInt('study_seconds_$todayStr') ?? 0;
+        _distractedSeconds = prefs.getInt('distracted_seconds_$todayStr') ?? 0;
+        await loadWeeklyData();
+      }
 
       _lastLaunchedPackage = null;
       _exitTime = null;

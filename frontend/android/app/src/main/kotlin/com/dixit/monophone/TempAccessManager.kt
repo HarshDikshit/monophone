@@ -71,7 +71,8 @@ object TempAccessManager {
      * Returns the max allowed emergency uses for the given package (read from BlockerConfig).
      */
     fun getMaxEmergencyCount(context: Context, packageName: String): Int {
-        return BlockerConfig.emergencyUseMaxCounts[packageName] ?: 3
+        val configured = BlockerConfig.emergencyUseMaxCounts[packageName] ?: 5
+        return configured.coerceAtMost(5)
     }
 
     /**

@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../services/api_service.dart';
 import '../services/launcher_state.dart';
+import '../services/auth_guard.dart';
 
 // ====================================================================
 //  AnalyticsScreen – Monochrome (white/grey/black) design
@@ -45,7 +46,11 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   @override
   void initState() {
     super.initState();
-    _refresh();
+    _checkAuthThenLoad();
+  }
+
+  Future<void> _checkAuthThenLoad() async {
+    await requireAuth(context, onAuthenticated: _refresh);
   }
 
   void _goPrev() =>
@@ -164,7 +169,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     if (days.length != 1) return List.filled(24, 0);
     final hourly = hourlyRaw.map((e) => (e as num).toInt()).toList();
     if (hourly.length != 24) return List.filled(24, 0);
-    final dayTotal = (days.first['studySeconds'] ?? 0) as int;
+    final dayTotal = ((days.first['studySeconds'] as num?) ?? 0).toInt();
     final sum = hourly.fold<int>(0, (a, b) => a + b);
     if (sum == 0) return List.filled(24, 0);
     return hourly.map((v) => (v * dayTotal / sum).round()).toList();
@@ -378,8 +383,10 @@ class _DateWindow {
     this.hourly = const [],
     this.allDates = const [],
   });
-  int get totalStudySeconds =>
-      days.fold<int>(0, (a, d) => a + (d['studySeconds'] as int? ?? 0));
+  int get totalStudySeconds => days.fold<int>(
+    0,
+    (a, d) => a + ((d['studySeconds'] as num?) ?? 0).toInt(),
+  );
 }
 
 String _fmtHM(int s) {
@@ -817,7 +824,7 @@ class _FocusPeriodsMultiDay extends StatelessWidget {
     final rows = <_SessionRow>[];
     int globalMax = 1;
     for (final d in days) {
-      final total = (d['studySeconds'] ?? 0) as int;
+      final total = ((d['studySeconds'] as num?) ?? 0).toInt();
       // Distribute proportionally across 12-hour active window
       final hour =
           (DateTime.tryParse(
@@ -1248,13 +1255,13 @@ class _FocusDistributionCard extends StatelessWidget {
       final tasks = List<Map<String, dynamic>>.from(state.tasks);
       if (tasks.isNotEmpty) {
         tasks.sort(
-          (a, b) => ((b['focusSeconds'] ?? 0) as int).compareTo(
-            (a['focusSeconds'] ?? 0) as int,
+          (a, b) => ((b['focusSeconds'] as num?) ?? 0).toInt().compareTo(
+            ((a['focusSeconds'] as num?) ?? 0).toInt(),
           ),
         );
         topTask = (tasks.first['title'] as String?) ?? '';
         for (final t in tasks) {
-          taskSeconds += (t['focusSeconds'] ?? 0) as int;
+          taskSeconds += ((t['focusSeconds'] as num?) ?? 0).toInt();
         }
       } else {
         topTask = '';
@@ -1469,7 +1476,7 @@ class _FocusTimeBarCardState extends State<_FocusTimeBarCard> {
       );
 
     final values = days
-        .map((d) => ((d['studySeconds'] ?? 0) as int) / 3600.0)
+        .map((d) => (((d['studySeconds'] as num?) ?? 0).toInt()) / 3600.0)
         .toList();
     final maxV = values.isEmpty
         ? 1.0
@@ -1920,7 +1927,7 @@ class _WeekGoalRings extends StatelessWidget {
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: List.generate(7, (i) {
         final study = (i < days.length ? days[i] : null)?['studySeconds'] ?? 0;
-        final pct = ((study as int) / goal).clamp(0.0, 1.0);
+        final pct = (((study as num?) ?? 0).toInt() / goal).clamp(0.0, 1.0);
         return Column(
           children: [
             SizedBox(
@@ -2008,7 +2015,7 @@ class _MonthGoalGrid extends StatelessWidget {
   }
 
   Widget _dayCell(Map<String, dynamic> d, int goal) {
-    final study = (d['studySeconds'] ?? 0) as int;
+    final study = ((d['studySeconds'] as num?) ?? 0).toInt();
     final pct = (study / goal).clamp(0.0, 1.0);
     final dayNum = (d['date'] as String? ?? '').split('-').last;
     return SizedBox(
