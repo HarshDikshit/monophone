@@ -33,7 +33,22 @@ const dailyActivitySchema = new mongoose.Schema({
   totalDistractedSeconds: { type: Number, default: 0 },
   streakMaintained: { type: Boolean, default: false },
   lastEvent: { type: String, default: null },
-  lastEventAt: { type: Date, default: null }
+  lastEventAt: { type: Date, default: null },
+  hourly: { type: [Number], default: new Array(24).fill(0) },
+  taskAnalytics: [{
+    taskId: String,
+    title: String,
+    seconds: { type: Number, default: 0 }
+  }],
+  sessions: [{
+    startTime: Date,
+    endTime: Date,
+    definedSeconds: Number,
+    actualSeconds: Number,
+    taskId: String,
+    title: String,
+    isBreak: { type: Boolean, default: false }
+  }]
 });
 
 // Compound unique index so there is exactly one summary per user per day

@@ -1,5 +1,11 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../services/task_planner_service.dart';
+import '../services/launcher_state.dart';
+import '../services/unified_task_service.dart';
+import '../services/alarm_service.dart';
+import '../widgets/task_edit_sheet.dart';
 
 class DayPlannerScreen extends StatefulWidget {
   const DayPlannerScreen({super.key});
@@ -11,10 +17,13 @@ class DayPlannerScreen extends StatefulWidget {
 class _DayPlannerScreenState extends State<DayPlannerScreen>
     with TickerProviderStateMixin {
   late TaskPlannerService _planner;
+  final AlarmService _alarmService = AlarmService();
   DateTime _selectedDate = DateTime.now();
   bool _showMonthView = false;
   late AnimationController _viewAnimCtrl;
   late Animation<double> _viewAnim;
+  final ScrollController _scrollCtrl = ScrollController();
+  Timer? _timeRefreshTimer;
 
   @override
   void initState() {
@@ -22,18 +31,59 @@ class _DayPlannerScreenState extends State<DayPlannerScreen>
     _planner = TaskPlannerService();
     _planner.addListener(_onPlannerChange);
     _planner.load();
+    _alarmService.addListener(_onPlannerChange);
+    _alarmService.attach(_planner);
     _viewAnimCtrl = AnimationController(
       duration: const Duration(milliseconds: 300),
       vsync: this,
     );
     _viewAnim = CurvedAnimation(parent: _viewAnimCtrl, curve: Curves.easeInOut);
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final launcherState = context.read<LauncherState>();
+      UnifiedTaskService.instance.attach(launcherState, _planner);
+      launcherState.attachPlanner(_planner);
+      _scrollToCurrentTime();
+    });
+  }
+
+  void _scrollToCurrentTime() {
+    const hourHeight = 120.0;
+    final now = DateTime.now();
+    final target =
+        now.hour * hourHeight + (now.minute / 60.0) * hourHeight - 120;
+    if (target > 0) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_scrollCtrl.hasClients) {
+          _scrollCtrl.animateTo(
+            target.clamp(0.0, _scrollCtrl.position.maxScrollExtent),
+            duration: const Duration(milliseconds: 400),
+            curve: Curves.easeInOut,
+          );
+        }
+      });
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _timeRefreshTimer?.cancel();
+    _timeRefreshTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+      if (mounted) setState(() {});
+    });
   }
 
   @override
   void dispose() {
+    _timeRefreshTimer?.cancel();
+    _alarmService.removeListener(_onPlannerChange);
+    _alarmService.detach();
+    _alarmService.dispose();
     _planner.removeListener(_onPlannerChange);
     _planner.dispose();
     _viewAnimCtrl.dispose();
+    _scrollCtrl.dispose();
     super.dispose();
   }
 
@@ -53,6 +103,21 @@ class _DayPlannerScreenState extends State<DayPlannerScreen>
   void _goToDate(DateTime date) {
     setState(() => _selectedDate = date);
     if (_showMonthView) _toggleView();
+  }
+
+  double _computeHourHeight(List<TimeBlockTask> tasks) {
+    if (tasks.isEmpty) return 120.0;
+    int minHour = 23;
+    int maxHour = 0;
+    for (final t in tasks) {
+      final sh = t.startTime.hour;
+      final eh = t.endTime.hour;
+      if (sh < minHour) minHour = sh;
+      if (eh > maxHour) maxHour = eh;
+    }
+    final span = (maxHour - minHour).clamp(1, 18);
+    final base = (400.0 / span).clamp(60.0, 180.0);
+    return base;
   }
 
   @override
@@ -87,7 +152,7 @@ class _DayPlannerScreenState extends State<DayPlannerScreen>
             _toggleView,
           ),
           const SizedBox(width: 4),
-          _iconBtn(Icons.add, 'Add task', () => _showTaskEditor(context, null)),
+          _iconBtn(Icons.add, 'Add task', () => _showTaskSheet(context)),
           const SizedBox(width: 8),
         ],
       ),
@@ -104,7 +169,6 @@ class _DayPlannerScreenState extends State<DayPlannerScreen>
     );
   }
 
-  // ── MONTH VIEW ─────────────────────────────────────────────────────
   Widget _buildMonthView(Map<DateTime, List<TimeBlockTask>> monthData) {
     final now = DateTime.now();
     final firstDay = DateTime(_selectedDate.year, _selectedDate.month, 1);
@@ -188,7 +252,6 @@ class _DayPlannerScreenState extends State<DayPlannerScreen>
                   date.day == _selectedDate.day;
               final tasks =
                   monthData[DateTime(date.year, date.month, date.day)] ?? [];
-
               return GestureDetector(
                 onTap: () => _goToDate(date),
                 child: Container(
@@ -280,9 +343,14 @@ class _DayPlannerScreenState extends State<DayPlannerScreen>
     );
   }
 
-  // ── TODAY / DAY VIEW ──────────────────────────────────────────────
   Widget _buildTodayView(List<TimeBlockTask> tasks) {
     final now = DateTime.now();
+    final isToday =
+        _selectedDate.year == now.year &&
+        _selectedDate.month == now.month &&
+        _selectedDate.day == now.day;
+    final hourHeight = _computeHourHeight(tasks);
+    final totalHeight = hourHeight * 24;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -306,9 +374,27 @@ class _DayPlannerScreenState extends State<DayPlannerScreen>
                       fontSize: 13,
                     ),
                   ),
-                  if (_selectedDate.year != now.year ||
-                      _selectedDate.month != now.month ||
-                      _selectedDate.day != now.day)
+                  if (isToday)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 2,
+                      ),
+                      margin: const EdgeInsets.only(top: 4),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.white38),
+                      ),
+                      child: const Text(
+                        'TODAY',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontFamily: 'monospace',
+                          fontSize: 9,
+                          letterSpacing: 1,
+                        ),
+                      ),
+                    )
+                  else
                     GestureDetector(
                       onTap: () =>
                           setState(() => _selectedDate = DateTime.now()),
@@ -334,204 +420,126 @@ class _DayPlannerScreenState extends State<DayPlannerScreen>
         const Divider(color: Colors.white10, height: 1),
 
         Expanded(
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              const hourHeight = 80.0;
-              final totalHeight = hourHeight * 24;
-
-              return SingleChildScrollView(
-                child: SizedBox(
-                  height: totalHeight,
-                  child: Stack(
-                    children: [
-                      ...List.generate(24, (h) {
-                        return Positioned(
-                          top: h * hourHeight,
-                          left: 0,
-                          right: 0,
-                          child: SizedBox(
-                            height: hourHeight,
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                SizedBox(
-                                  width: 48,
-                                  child: Text(
-                                    '${h.toString().padLeft(2, '0')}:00',
-                                    style: TextStyle(
-                                      color: Colors.grey[800],
-                                      fontFamily: 'monospace',
-                                      fontSize: 9,
-                                    ),
-                                    textAlign: TextAlign.center,
-                                  ),
-                                ),
-                                Expanded(
-                                  child: Container(
-                                    decoration: BoxDecoration(
-                                      border: Border(
-                                        top: BorderSide(
-                                          color: Colors.white.withOpacity(0.06),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        );
-                      }),
-
-                      ...tasks.map((task) {
-                        final top =
-                            task.startTime.hour * hourHeight +
-                            (task.startTime.minute / 60.0) * hourHeight;
-                        final height =
-                            (task.durationMinutes / 60.0) * hourHeight;
-                        final isActive =
-                            task.startTime.isBefore(now) &&
-                            task.endTime.isAfter(now);
-
-                        return Positioned(
-                          top: top,
-                          left: 52,
-                          right: 8,
-                          height: height.clamp(30.0, hourHeight * 3),
-                          child: GestureDetector(
-                            onTap: () => _showTaskEditor(context, task),
-                            child: Container(
-                              margin: const EdgeInsets.symmetric(vertical: 1),
-                              padding: const EdgeInsets.all(6),
-                              decoration: BoxDecoration(
-                                color: task.isCompleted
-                                    ? task.tag.color.withOpacity(0.1)
-                                    : task.tag.color.withOpacity(0.2),
-                                border: Border.all(
-                                  color: isActive
-                                      ? Colors.white
-                                      : task.tag.color.withOpacity(0.4),
-                                  width: isActive ? 1.5 : 1,
-                                ),
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Row(
+          child: Consumer<LauncherState>(
+            builder: (context, state, _) {
+              return LayoutBuilder(
+                builder: (context, constraints) {
+                  return RefreshIndicator(
+                    onRefresh: () => state.syncStats(),
+                    color: Colors.white,
+                    backgroundColor: Colors.black,
+                    child: SingleChildScrollView(
+                      controller: _scrollCtrl,
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      child: SizedBox(
+                        height: totalHeight,
+                        child: Stack(
+                          children: [
+                            ...List.generate(24, (h) {
+                              return Positioned(
+                                top: h * hourHeight,
+                                left: 0,
+                                right: 0,
+                                child: SizedBox(
+                                  height: hourHeight,
+                                  child: Row(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      Icon(
-                                        task.tag.icon,
-                                        size: 10,
-                                        color: task.tag.color,
-                                      ),
-                                      const SizedBox(width: 4),
-                                      Expanded(
+                                      SizedBox(
+                                        width: 48,
                                         child: Text(
-                                          task.title,
+                                          '${h.toString().padLeft(2, '0')}:00',
                                           style: TextStyle(
-                                            color: task.isCompleted
-                                                ? Colors.white30
-                                                : Colors.white,
+                                            color: Colors.grey[800],
                                             fontFamily: 'monospace',
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.bold,
-                                            decoration: task.isCompleted
-                                                ? TextDecoration.lineThrough
-                                                : null,
+                                            fontSize: 9,
                                           ),
-                                          overflow: TextOverflow.ellipsis,
+                                          textAlign: TextAlign.center,
                                         ),
                                       ),
-                                      if (task.isCompleted)
-                                        const Icon(
-                                          Icons.check_circle,
-                                          color: Colors.green,
-                                          size: 12,
+                                      Expanded(
+                                        child: Container(
+                                          decoration: BoxDecoration(
+                                            border: Border(
+                                              top: BorderSide(
+                                                color: Colors.white.withOpacity(
+                                                  0.06,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
                                         ),
+                                      ),
                                     ],
                                   ),
-                                  if (height > 35) ...[
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      task.timeSlotString,
-                                      style: const TextStyle(
-                                        color: Colors.white38,
-                                        fontFamily: 'monospace',
-                                        fontSize: 8,
+                                ),
+                              );
+                            }),
+  
+                            ...tasks.map((task) {
+                              final top =
+                                  task.startTime.hour * hourHeight +
+                                  (task.startTime.minute / 60.0) * hourHeight;
+                              final height =
+                                  (task.durationMinutes / 60.0) * hourHeight;
+                              final isActive =
+                                  task.startTime.isBefore(now) &&
+                                  task.endTime.isAfter(now);
+                              final totalMinutes =
+                                  task.estimatedPomodoros *
+                                  _planner.pomodoroDuration;
+  
+                              return Positioned(
+                                top: top,
+                                left: 52,
+                                right: 8,
+                                height: height.clamp(50.0, hourHeight * 5),
+                                child: _TaskBlock(
+                                  task: task,
+                                  isActive: isActive,
+                                  totalMinutes: totalMinutes,
+                                  pomoDuration: _planner.pomodoroDuration,
+                                  onTap: () => _showTaskSheet(context, existing: task),
+                                ),
+                              );
+                            }),
+  
+                            if (isToday)
+                              Positioned(
+                                top:
+                                    now.hour * hourHeight +
+                                    (now.minute / 60.0) * hourHeight,
+                                left: 0,
+                                right: 0,
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      width: 48,
+                                      alignment: Alignment.center,
+                                      child: Text(
+                                        '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}',
+                                        style: const TextStyle(
+                                          color: Colors.redAccent,
+                                          fontFamily: 'monospace',
+                                          fontSize: 9,
+                                        ),
                                       ),
                                     ),
-                                    if (height > 50) ...[
-                                      const SizedBox(height: 2),
-                                      Row(
-                                        children: [
-                                          _miniBadge(
-                                            task.tag.displayName,
-                                            task.tag.color,
-                                          ),
-                                          const SizedBox(width: 4),
-                                          Text(
-                                            '🍅 ${task.completedPomodoros}/${task.estimatedPomodoros}',
-                                            style: const TextStyle(
-                                              color: Colors.white38,
-                                              fontSize: 8,
-                                              fontFamily: 'monospace',
-                                            ),
-                                          ),
-                                          if (task.isRecurring) ...[
-                                            const SizedBox(width: 4),
-                                            const Icon(
-                                              Icons.autorenew,
-                                              color: Colors.white24,
-                                              size: 10,
-                                            ),
-                                          ],
-                                        ],
+                                    Expanded(
+                                      child: Container(
+                                        height: 1,
+                                        color: Colors.redAccent,
                                       ),
+                                    ),
                                     ],
-                                  ],
-                                ],
-                              ),
-                            ),
-                          ),
-                        );
-                      }),
-
-                      if (_selectedDate.year == now.year &&
-                          _selectedDate.month == now.month &&
-                          _selectedDate.day == now.day)
-                        Positioned(
-                          top:
-                              now.hour * hourHeight +
-                              (now.minute / 60.0) * hourHeight,
-                          left: 0,
-                          right: 0,
-                          child: Row(
-                            children: [
-                              Container(
-                                width: 48,
-                                alignment: Alignment.center,
-                                child: Text(
-                                  '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}',
-                                  style: const TextStyle(
-                                    color: Colors.redAccent,
-                                    fontFamily: 'monospace',
-                                    fontSize: 9,
-                                  ),
                                 ),
                               ),
-                              Expanded(
-                                child: Container(
-                                  height: 1,
-                                  color: Colors.redAccent,
-                                ),
-                              ),
-                            ],
-                          ),
+                          ],
                         ),
-                    ],
-                  ),
-                ),
+                      ),
+                    ),
+                  );
+                },
               );
             },
           ),
@@ -544,432 +552,42 @@ class _DayPlannerScreenState extends State<DayPlannerScreen>
     setState(() => _selectedDate = _selectedDate.add(Duration(days: delta)));
   }
 
-  Widget _miniBadge(String label, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-      decoration: BoxDecoration(
-        border: Border.all(color: color.withOpacity(0.5)),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          color: color,
-          fontSize: 7,
-          fontFamily: 'monospace',
-          fontWeight: FontWeight.bold,
-        ),
+  void _showTaskSheet(
+    BuildContext context, {
+    TimeBlockTask? existing,
+    DateTime? initialTime,
+  }) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => TaskEditSheet(
+        existing: existing,
+        initialDate: initialTime ?? _selectedDate,
+        planner: _planner,
+        pomoDurationMins: _planner.pomodoroDuration,
       ),
     );
   }
 
-  // ── TASK EDITOR DIALOG ────────────────────────────────────────────
-  void _showTaskEditor(BuildContext context, TimeBlockTask? existing) {
-    final edit = existing != null;
-    final titleCtrl = TextEditingController(text: existing?.title ?? '');
-    final descCtrl = TextEditingController(text: existing?.description ?? '');
-    TaskTag selectedTag = existing?.tag ?? TaskTag.focus;
-    DateTime selectedTime = existing?.startTime ?? DateTime.now();
-    int durationMins = existing?.durationMinutes ?? 60;
-    int estPomodoros = existing?.estimatedPomodoros ?? 2;
-    bool isRecurring = existing?.isRecurring ?? false;
-    List<int> recurringDays = existing?.recurringDays ?? [];
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: const Color(0xFF0A0A0A),
-      shape: const Border(top: BorderSide(color: Colors.white12)),
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return DraggableScrollableSheet(
-              expand: false,
-              initialChildSize: 0.85,
-              maxChildSize: 0.95,
-              builder: (ctx, scrollCtrl) {
-                return Padding(
-                  padding: EdgeInsets.only(
-                    left: 24,
-                    right: 24,
-                    top: 16,
-                    bottom: MediaQuery.of(context).viewInsets.bottom + 24,
-                  ),
-                  child: ListView(
-                    controller: scrollCtrl,
-                    children: [
-                      Center(
-                        child: Container(
-                          width: 36,
-                          height: 3,
-                          color: Colors.white24,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        edit ? 'EDIT TASK' : 'NEW TASK',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontFamily: 'monospace',
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 2,
-                        ),
-                      ),
-                      const SizedBox(height: 24),
-
-                      TextField(
-                        controller: titleCtrl,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontFamily: 'monospace',
-                          fontSize: 14,
-                        ),
-                        cursorColor: Colors.white,
-                        decoration: const InputDecoration(
-                          hintText: 'TASK TITLE',
-                          hintStyle: TextStyle(color: Colors.white12),
-                          enabledBorder: UnderlineInputBorder(
-                            borderSide: BorderSide(color: Colors.white10),
-                          ),
-                          focusedBorder: UnderlineInputBorder(
-                            borderSide: BorderSide(color: Colors.white),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-
-                      TextField(
-                        controller: descCtrl,
-                        style: const TextStyle(
-                          color: Colors.white60,
-                          fontFamily: 'monospace',
-                          fontSize: 12,
-                        ),
-                        cursorColor: Colors.white,
-                        maxLines: 2,
-                        decoration: InputDecoration(
-                          hintText: 'DESCRIPTION (optional)',
-                          hintStyle: TextStyle(
-                            color: Colors.white.withOpacity(0.08),
-                          ),
-                          enabledBorder: UnderlineInputBorder(
-                            borderSide: BorderSide(color: Colors.white10),
-                          ),
-                          focusedBorder: UnderlineInputBorder(
-                            borderSide: BorderSide(color: Colors.white),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 20),
-
-                      const Text(
-                        'TAG',
-                        style: TextStyle(
-                          color: Colors.white38,
-                          fontFamily: 'monospace',
-                          fontSize: 10,
-                          letterSpacing: 1,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: TaskTag.values.map((tag) {
-                          final isSel = selectedTag == tag;
-                          return GestureDetector(
-                            onTap: () =>
-                                setDialogState(() => selectedTag = tag),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                vertical: 6,
-                                horizontal: 12,
-                              ),
-                              decoration: BoxDecoration(
-                                color: isSel
-                                    ? tag.color.withOpacity(0.15)
-                                    : Colors.transparent,
-                                border: Border.all(
-                                  color: isSel ? tag.color : Colors.white12,
-                                ),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(tag.icon, size: 14, color: tag.color),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    tag.displayName,
-                                    style: TextStyle(
-                                      color: isSel ? tag.color : Colors.white38,
-                                      fontFamily: 'monospace',
-                                      fontSize: 11,
-                                      fontWeight: isSel
-                                          ? FontWeight.bold
-                                          : FontWeight.normal,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          );
-                        }).toList(),
-                      ),
-                      const SizedBox(height: 20),
-
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _infoField(
-                              'START TIME',
-                              '${selectedTime.hour.toString().padLeft(2, '0')}:${selectedTime.minute.toString().padLeft(2, '0')}',
-                              () async {
-                                final t = await showTimePicker(
-                                  context: context,
-                                  initialTime: TimeOfDay.fromDateTime(
-                                    selectedTime,
-                                  ),
-                                  builder: (ctx, child) => Theme(
-                                    data: Theme.of(ctx).copyWith(
-                                      colorScheme: const ColorScheme.dark(
-                                        primary: Colors.white,
-                                      ),
-                                    ),
-                                    child: child!,
-                                  ),
-                                );
-                                if (t != null) {
-                                  selectedTime = DateTime(
-                                    selectedTime.year,
-                                    selectedTime.month,
-                                    selectedTime.day,
-                                    t.hour,
-                                    t.minute,
-                                  );
-                                  setDialogState(() {});
-                                }
-                              },
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: _infoField(
-                              'DURATION',
-                              '$durationMins min',
-                              () {
-                                showDialog(
-                                  context: context,
-                                  builder: (ctx) => _numberPickerDialog(
-                                    ctx,
-                                    'Duration (minutes)',
-                                    durationMins,
-                                    5,
-                                    480,
-                                    (v) {
-                                      setDialogState(() => durationMins = v);
-                                      Navigator.pop(ctx);
-                                    },
-                                  ),
-                                );
-                              },
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 20),
-
-                      _infoField('ESTIMATED POMODOROS', '$estPomodoros 🍅', () {
-                        showDialog(
-                          context: context,
-                          builder: (ctx) => _numberPickerDialog(
-                            ctx,
-                            'Estimated Pomodoros',
-                            estPomodoros,
-                            1,
-                            20,
-                            (v) {
-                              setDialogState(() => estPomodoros = v);
-                              Navigator.pop(ctx);
-                            },
-                          ),
-                        );
-                      }),
-                      const SizedBox(height: 20),
-
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          border: Border.all(color: Colors.white10),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                const Text(
-                                  'REPEAT WEEKLY',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontFamily: 'monospace',
-                                    fontSize: 11,
-                                  ),
-                                ),
-                                Switch(
-                                  value: isRecurring,
-                                  onChanged: (v) =>
-                                      setDialogState(() => isRecurring = v),
-                                  activeColor: Colors.white,
-                                  activeTrackColor: Colors.white60,
-                                ),
-                              ],
-                            ),
-                            if (isRecurring) ...[
-                              const SizedBox(height: 8),
-                              Wrap(
-                                spacing: 6,
-                                children:
-                                    [
-                                      'Mon',
-                                      'Tue',
-                                      'Wed',
-                                      'Thu',
-                                      'Fri',
-                                      'Sat',
-                                      'Sun',
-                                    ].asMap().entries.map((e) {
-                                      final dayNum = e.key + 1;
-                                      final isDaySelected = recurringDays
-                                          .contains(dayNum);
-                                      return GestureDetector(
-                                        onTap: () {
-                                          setDialogState(() {
-                                            if (isDaySelected)
-                                              recurringDays.remove(dayNum);
-                                            else
-                                              recurringDays.add(dayNum);
-                                          });
-                                        },
-                                        child: Container(
-                                          width: 36,
-                                          height: 36,
-                                          decoration: BoxDecoration(
-                                            border: Border.all(
-                                              color: isDaySelected
-                                                  ? Colors.white
-                                                  : Colors.white12,
-                                            ),
-                                            color: isDaySelected
-                                                ? Colors.white
-                                                : Colors.transparent,
-                                          ),
-                                          child: Center(
-                                            child: Text(
-                                              e.value.substring(0, 1),
-                                              style: TextStyle(
-                                                color: isDaySelected
-                                                    ? Colors.black
-                                                    : Colors.white38,
-                                                fontFamily: 'monospace',
-                                                fontSize: 10,
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      );
-                                    }).toList(),
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 24),
-
-                      Row(
-                        children: [
-                          Expanded(
-                            child: GestureDetector(
-                              onTap: () {
-                                if (titleCtrl.text.trim().isEmpty) return;
-                                final task = TimeBlockTask(
-                                  id:
-                                      existing?.id ??
-                                      DateTime.now().millisecondsSinceEpoch
-                                          .toString(),
-                                  title: titleCtrl.text.trim(),
-                                  description: descCtrl.text.trim(),
-                                  tag: selectedTag,
-                                  startTime: selectedTime,
-                                  durationMinutes: durationMins,
-                                  estimatedPomodoros: estPomodoros,
-                                  isRecurring: isRecurring,
-                                  recurringDays: isRecurring
-                                      ? recurringDays
-                                      : [],
-                                  isCompleted: existing?.isCompleted ?? false,
-                                  focusSeconds: existing?.focusSeconds ?? 0,
-                                  completedPomodoros:
-                                      existing?.completedPomodoros ?? 0,
-                                );
-                                if (edit) {
-                                  _planner.updateTask(task);
-                                } else {
-                                  _planner.addTask(task);
-                                  _planner.scheduleReminders([task]);
-                                }
-                                Navigator.pop(context);
-                              },
-                              child: Container(
-                                height: 48,
-                                color: Colors.white,
-                                child: const Center(
-                                  child: Text(
-                                    'SAVE',
-                                    style: TextStyle(
-                                      color: Colors.black,
-                                      fontWeight: FontWeight.bold,
-                                      fontFamily: 'monospace',
-                                      letterSpacing: 2,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                          if (edit) ...[
-                            const SizedBox(width: 12),
-                            GestureDetector(
-                              onTap: () {
-                                _planner.removeTask(existing.id);
-                                Navigator.pop(context);
-                              },
-                              child: Container(
-                                width: 48,
-                                height: 48,
-                                decoration: BoxDecoration(
-                                  border: Border.all(color: Colors.redAccent),
-                                ),
-                                child: const Center(
-                                  child: Icon(
-                                    Icons.delete_outline,
-                                    color: Colors.redAccent,
-                                    size: 20,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ],
-                  ),
-                );
-              },
-            );
-          },
-        );
-      },
+  Widget _timeBtn(String label, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 28,
+        height: 28,
+        decoration: BoxDecoration(border: Border.all(color: Colors.white12)),
+        child: Center(
+          child: Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white,
+              fontFamily: 'monospace',
+              fontSize: 8,
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -998,6 +616,7 @@ class _DayPlannerScreenState extends State<DayPlannerScreen>
                 color: Colors.white,
                 fontFamily: 'monospace',
                 fontSize: 13,
+                fontWeight: FontWeight.bold,
               ),
             ),
           ],
@@ -1076,6 +695,393 @@ class _DayPlannerScreenState extends State<DayPlannerScreen>
             color: Colors.white.withOpacity(0.03),
           ),
           child: Icon(icon, color: Colors.white70, size: 18),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Task Block Widget ──
+class _TaskBlock extends StatefulWidget {
+  final TimeBlockTask task;
+  final bool isActive;
+  final int totalMinutes;
+  final int pomoDuration;
+  final VoidCallback onTap;
+
+  const _TaskBlock({
+    required this.task,
+    required this.isActive,
+    required this.totalMinutes,
+    required this.pomoDuration,
+    required this.onTap,
+  });
+
+  @override
+  State<_TaskBlock> createState() => _TaskBlockState();
+}
+
+class _TaskBlockState extends State<_TaskBlock> {
+  double _dragOffset = 0;
+  bool _isRevealed = false;
+  static const double _revealThreshold = 120;
+
+  void _toggleComplete() {
+    final planner = context
+        .findAncestorStateOfType<_DayPlannerScreenState>()
+        ?._planner;
+    if (planner != null) {
+      planner.toggleComplete(widget.task.id);
+    }
+  }
+
+  void _onTapDismiss() {
+    setState(() {
+      _dragOffset = 0;
+      _isRevealed = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onHorizontalDragUpdate: (details) {
+        setState(() {
+          _dragOffset = (_dragOffset + details.delta.dx).clamp(
+            -_revealThreshold - 20,
+            0,
+          );
+          _isRevealed = _dragOffset < -_revealThreshold;
+        });
+      },
+      onHorizontalDragEnd: (details) {
+        setState(() {
+          if (_dragOffset < -_revealThreshold / 2) {
+            _dragOffset = -_revealThreshold;
+            _isRevealed = true;
+          } else {
+            _dragOffset = 0;
+            _isRevealed = false;
+          }
+        });
+      },
+      onTap: () {
+        if (_isRevealed) {
+          _onTapDismiss();
+        } else {
+          widget.onTap();
+        }
+      },
+      onLongPress: _toggleComplete,
+      child: SizedBox(
+        height: double.infinity,
+        child: Stack(
+          children: [
+            // Background actions (edit + delete) revealed on swipe
+            if (_isRevealed || _dragOffset < -10)
+              Positioned(
+                right: 0,
+                top: 0,
+                bottom: 0,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    GestureDetector(
+                      onTap: () {
+                        _onTapDismiss();
+                        widget.onTap();
+                      },
+                      child: Container(
+                        width: _revealThreshold / 2,
+                        color: Colors.blue.withOpacity(0.2),
+                        alignment: Alignment.center,
+                        child: const Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.edit, color: Colors.blue, size: 14),
+                            SizedBox(height: 2),
+                            Text(
+                              'EDIT',
+                              style: TextStyle(
+                                color: Colors.blue,
+                                fontSize: 7,
+                                fontFamily: 'monospace',
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    GestureDetector(
+                      onTap: () {
+                        _onTapDismiss();
+                        final planner = context
+                            .findAncestorStateOfType<_DayPlannerScreenState>()
+                            ?._planner;
+                        if (planner != null) {
+                          planner.removeTask(widget.task.id);
+                        }
+                      },
+                      child: Container(
+                        width: _revealThreshold / 2,
+                        color: Colors.red.withOpacity(0.2),
+                        alignment: Alignment.center,
+                        child: const Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.delete_outline,
+                              color: Colors.redAccent,
+                              size: 14,
+                            ),
+                            SizedBox(height: 2),
+                            Text(
+                              'DELETE',
+                              style: TextStyle(
+                                color: Colors.redAccent,
+                                fontSize: 7,
+                                fontFamily: 'monospace',
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            // Main content that slides
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              transform: Matrix4.translationValues(_dragOffset, 0, 0),
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: widget.task.isCompleted
+                    ? Colors.green.withOpacity(0.08)
+                    : Colors.amber.withOpacity(0.08),
+                border: Border(
+                  left: BorderSide(
+                    color: widget.isActive
+                        ? Colors.white
+                        : (widget.task.isCompleted
+                              ? Colors.green.withOpacity(0.6)
+                              : Colors.amber.withOpacity(0.6)),
+                    width: widget.isActive ? 2 : 1,
+                  ),
+                ),
+              ),
+              child: Consumer<LauncherState>(
+                builder: (context, state, _) {
+                  final isThisTaskActive = state.activeTaskId == widget.task.id;
+                  final isRunning = state.isPomodoroActive && isThisTaskActive;
+
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        children: [
+                          // Completion indicator icon (visual only)
+                          Container(
+                            width: 12,
+                            height: 12,
+                            margin: const EdgeInsets.only(right: 4),
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: widget.task.isCompleted
+                                  ? Colors.green.withOpacity(0.2)
+                                  : Colors.transparent,
+                              border: Border.all(
+                                color: widget.task.isCompleted
+                                    ? Colors.green
+                                    : Colors.white24,
+                                width: 1.5,
+                              ),
+                            ),
+                            child: widget.task.isCompleted
+                                ? const Icon(
+                                    Icons.check,
+                                    size: 8,
+                                    color: Colors.green,
+                                  )
+                                : null,
+                          ),
+                          Icon(
+                            widget.task.tag.icon,
+                            size: 9,
+                            color: widget.task.tag.color,
+                          ),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              child: Text(
+                                widget.task.title,
+                                style: TextStyle(
+                                  color: widget.task.isCompleted
+                                      ? Colors.green.withOpacity(0.7)
+                                      : Colors.white,
+                                  fontFamily: 'monospace',
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  decoration: widget.task.isCompleted
+                                      ? TextDecoration.lineThrough
+                                      : null,
+                                ),
+                              ),
+                            ),
+                          ),
+                          // Bell icon for alarm-enabled tasks
+                          if (widget.task.isAlarmEnabled)
+                            const Padding(
+                              padding: EdgeInsets.only(right: 2),
+                              child: Icon(
+                                Icons.notifications_active,
+                                color: Colors.orangeAccent,
+                                size: 8,
+                              ),
+                            ),
+                          const SizedBox(width: 4),
+                          // Play button
+                          GestureDetector(
+                            onTap: () {
+                              state.switchActiveTask(
+                                widget.task.id,
+                                taskName: widget.task.title,
+                              );
+                              state.setCustomDuration(widget.pomoDuration * 60);
+                              if (!state.isPomodoroActive) {
+                                state.startPomodoro();
+                              }
+                            },
+                            child: Container(
+                              width: 22,
+                              height: 22,
+                              decoration: BoxDecoration(
+                                color: isRunning
+                                    ? Colors.white.withOpacity(0.1)
+                                    : Colors.transparent,
+                                border: Border.all(
+                                  color: isRunning
+                                      ? Colors.white38
+                                      : Colors.white12,
+                                ),
+                              ),
+                              child: Icon(
+                                Icons.play_arrow,
+                                color: isRunning
+                                    ? Colors.white
+                                    : Colors.greenAccent,
+                                size: 13,
+                              ),
+                            ),
+                          ),
+                          if (isRunning) ...[
+                            const SizedBox(width: 2),
+                            GestureDetector(
+                              onTap: () {
+                                state.stopPomodoro(manual: true);
+                                state.switchActiveTask(null);
+                              },
+                              child: Container(
+                                width: 22,
+                                height: 22,
+                                decoration: BoxDecoration(
+                                  color: Colors.red.withOpacity(0.1),
+                                ),
+                                child: const Icon(
+                                  Icons.stop,
+                                  color: Colors.redAccent,
+                                  size: 12,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      Row(
+                        children: [
+                          Text(
+                            '${widget.task.startTime.hour.toString().padLeft(2, '0')}:${widget.task.startTime.minute.toString().padLeft(2, '0')}-${widget.task.endTime.hour.toString().padLeft(2, '0')}:${widget.task.endTime.minute.toString().padLeft(2, '0')}',
+                            style: const TextStyle(
+                              color: Colors.white30,
+                              fontFamily: 'monospace',
+                              fontSize: 7,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 3,
+                              vertical: 1,
+                            ),
+                            decoration: BoxDecoration(
+                              border: Border.all(
+                                color: widget.task.tag.color.withOpacity(0.4),
+                              ),
+                            ),
+                            child: Text(
+                              widget.task.tag.displayName.substring(0, 3),
+                              style: TextStyle(
+                                color: widget.task.tag.color,
+                                fontSize: 6,
+                                fontFamily: 'monospace',
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            '🍅${widget.task.completedPomodoros}/${widget.task.estimatedPomodoros}',
+                            style: const TextStyle(
+                              color: Colors.white30,
+                              fontSize: 7,
+                              fontFamily: 'monospace',
+                            ),
+                          ),
+                          const Spacer(),
+                          Text(
+                            '${widget.totalMinutes}m',
+                            style: const TextStyle(
+                              color: Colors.white24,
+                              fontSize: 7,
+                              fontFamily: 'monospace',
+                            ),
+                          ),
+                          if (isRunning) ...[
+                            const SizedBox(width: 4),
+                            Text(
+                              '${(state.pomodoroSecondsRemaining ~/ 60).toString().padLeft(2, '0')}:${(state.pomodoroSecondsRemaining % 60).toString().padLeft(2, '0')}',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 7,
+                                fontFamily: 'monospace',
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                      if (widget.task.description.isNotEmpty) ...[
+                        const SizedBox(height: 1),
+                        SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Text(
+                            widget.task.description,
+                            style: const TextStyle(
+                              color: Colors.white12,
+                              fontSize: 6,
+                              fontFamily: 'monospace',
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  );
+                },
+              ),
+            ),
+          ],
         ),
       ),
     );

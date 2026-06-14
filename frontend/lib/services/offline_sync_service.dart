@@ -29,19 +29,25 @@ class OfflineSyncService {
     _syncTimer = null;
   }
 
-  /// Queue an activity sync for later
   Future<void> queueActivitySync(
     String date,
     int studySeconds,
-    int distractedSeconds,
-  ) async {
-    await _enqueue({
+    int distractedSeconds, {
+    List<int>? hourly,
+    List<Map<String, dynamic>>? taskAnalytics,
+    List<Map<String, dynamic>>? sessions,
+  }) async {
+    final payload = {
       'type': 'sync_activity',
       'date': date,
       'studySeconds': studySeconds,
       'distractedSeconds': distractedSeconds,
       'timestamp': DateTime.now().toIso8601String(),
-    });
+    };
+    if (hourly != null) payload['hourly'] = hourly;
+    if (taskAnalytics != null) payload['taskAnalytics'] = taskAnalytics;
+    if (sessions != null) payload['sessions'] = sessions;
+    await _enqueue(payload);
   }
 
   /// Queue a goal update for later
@@ -119,6 +125,9 @@ class OfflineSyncService {
               item['date'] as String,
               item['studySeconds'] as int,
               item['distractedSeconds'] as int,
+              hourly: item['hourly'] != null ? List<int>.from(item['hourly']) : null,
+              taskAnalytics: item['taskAnalytics'] != null ? List<Map<String, dynamic>>.from(item['taskAnalytics']) : null,
+              sessions: item['sessions'] != null ? List<Map<String, dynamic>>.from(item['sessions']) : null,
             );
             success = true;
           } else if (type == 'update_goal') {

@@ -14,6 +14,7 @@ import '../services/update_service.dart';
 import '../services/blocker_service.dart';
 import '../widgets/update_dialog.dart';
 import '../widgets/panel_widgets/widget_panel.dart';
+import '../widgets/lego_uncle/lego_uncle.dart';
 
 class LauncherHome extends StatefulWidget {
   const LauncherHome({super.key});
@@ -1841,30 +1842,38 @@ class _LauncherHomeState extends State<LauncherHome>
                         ),
                         const SizedBox(height: 16),
 
-                        // 2. Large Minimal Clock
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                        // 2. Large Minimal Clock & Lego Uncle
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.end,
                           children: [
-                            Text(
-                              _timeString,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 48,
-                                fontWeight: FontWeight.w100,
-                                letterSpacing: 2,
-                                fontFamily: 'monospace',
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    _timeString,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 48,
+                                      fontWeight: FontWeight.w100,
+                                      letterSpacing: 2,
+                                      fontFamily: 'monospace',
+                                    ),
+                                  ),
+                                  Text(
+                                    _dateString,
+                                    style: TextStyle(
+                                      color: Colors.grey[600],
+                                      fontSize: 10,
+                                      letterSpacing: 2,
+                                      fontWeight: FontWeight.bold,
+                                      fontFamily: 'monospace',
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                            Text(
-                              _dateString,
-                              style: TextStyle(
-                                color: Colors.grey[600],
-                                fontSize: 10,
-                                letterSpacing: 2,
-                                fontWeight: FontWeight.bold,
-                                fontFamily: 'monospace',
-                              ),
-                            ),
+                            const LegoUncle(),
                           ],
                         ),
                         const SizedBox(height: 12),

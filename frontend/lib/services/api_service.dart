@@ -8,7 +8,7 @@ class ApiService {
   // The production API URL is injected at build time.
   static const String baseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://192.168.1.6:5000/api',
+    defaultValue: 'http://192.168.1.8:5000/api',
   );
   static const String appEnv = String.fromEnvironment(
     'APP_ENV',
@@ -28,6 +28,83 @@ class ApiService {
   static Future<void> logout() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('auth_token');
+    await prefs.remove('auth_email');
+    await prefs.remove('auth_password');
+  }
+
+  /// Save credentials for silent re-authentication.
+  /// The backend now issues tokens with no expiry, but this ensures
+  /// that if the token ever becomes invalid (e.g. secret rotation),
+  /// the app can silently re-login without bothering the user.
+  static Future<void> saveCredentials(String email, String password) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('auth_email', email);
+    await prefs.setString('auth_password', password);
+  }
+
+  /// Attempt silent re-login using stored credentials.
+  /// Returns true if a new token was obtained.
+  static Future<bool> trySilentReauth() async {
+    final prefs = await SharedPreferences.getInstance();
+    final email = prefs.getString('auth_email');
+    final password = prefs.getString('auth_password');
+    if (email == null || password == null) return false;
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/auth/login'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'email': email, 'password': password}),
+      );
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        if (data['token'] != null) {
+          await saveToken(data['token'] as String);
+          return true;
+        }
+      }
+    } catch (_) {
+      // Network error — silent fail, app works offline
+    }
+    return false;
+  }
+
+  /// Make an HTTP request with automatic silent re-authentication on 401/403.
+  /// If the request fails with an auth error, it will attempt to re-login
+  /// with stored credentials and retry the request once.
+  static Future<http.Response> _authenticatedRequest(
+    Future<http.Response> Function(String token) requestFn,
+  ) async {
+    final token = await getToken();
+    if (token == null) {
+      // No token at all — try silent re-auth first
+      final reauthed = await trySilentReauth();
+      if (reauthed) {
+        final newToken = await getToken();
+        return await requestFn(newToken!);
+      }
+      throw Exception('Not authenticated');
+    }
+
+    try {
+      final response = await requestFn(token);
+      if (response.statusCode == 401 || response.statusCode == 403) {
+        // Token invalid — try silent re-auth and retry once
+        final reauthed = await trySilentReauth();
+        if (reauthed) {
+          final newToken = await getToken();
+          return await requestFn(newToken!);
+        }
+        // Re-auth failed, throw auth error
+        throw Exception(
+          jsonDecode(response.body)['message'] ?? 'Authentication failed',
+        );
+      }
+      return response;
+    } on SocketException {
+      rethrow;
+    } on http.ClientException {
+      rethrow;
+    }
   }
 
   static Map<String, String> _headers(String? token) {
@@ -38,7 +115,25 @@ class ApiService {
     return headers;
   }
 
-  // Auth: Register
+  // Auth: Login
+  static Future<Map<String, dynamic>> login(
+    String email,
+    String password,
+  ) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/auth/login'),
+      headers: _headers(null),
+      body: jsonEncode({'email': email, 'password': password}),
+    );
+    final data = jsonDecode(response.body);
+    if (response.statusCode == 200 && data['token'] != null) {
+      await saveToken(data['token']);
+      await saveCredentials(email, password); // for silent re-auth
+    }
+    return data;
+  }
+
+  // Auth: Register (with credential saving for silent re-auth)
   static Future<Map<String, dynamic>> register(
     String name,
     String email,
@@ -55,22 +150,10 @@ class ApiService {
         'role': role,
       }),
     );
-    return jsonDecode(response.body);
-  }
-
-  // Auth: Login
-  static Future<Map<String, dynamic>> login(
-    String email,
-    String password,
-  ) async {
-    final response = await http.post(
-      Uri.parse('$baseUrl/auth/login'),
-      headers: _headers(null),
-      body: jsonEncode({'email': email, 'password': password}),
-    );
     final data = jsonDecode(response.body);
-    if (response.statusCode == 200 && data['token'] != null) {
+    if (response.statusCode == 201 && data['token'] != null) {
       await saveToken(data['token']);
+      await saveCredentials(email, password); // for silent re-auth
     }
     return data;
   }
@@ -177,19 +260,27 @@ class ApiService {
   static Future<Map<String, dynamic>> syncActivity(
     String date,
     int totalStudySeconds,
-    int totalDistractedSeconds,
-  ) async {
+    int totalDistractedSeconds, {
+    List<int>? hourly,
+    List<Map<String, dynamic>>? taskAnalytics,
+    List<Map<String, dynamic>>? sessions,
+  }) async {
     final token = await getToken();
     if (token == null) throw Exception('Not authenticated');
     try {
+      final payload = {
+        'date': date,
+        'totalStudySeconds': totalStudySeconds,
+        'totalDistractedSeconds': totalDistractedSeconds,
+      };
+      if (hourly != null) payload['hourly'] = hourly;
+      if (taskAnalytics != null) payload['taskAnalytics'] = taskAnalytics;
+      if (sessions != null) payload['sessions'] = sessions;
+
       final response = await http.post(
         Uri.parse('$baseUrl/activity/sync'),
         headers: _headers(token),
-        body: jsonEncode({
-          'date': date,
-          'totalStudySeconds': totalStudySeconds,
-          'totalDistractedSeconds': totalDistractedSeconds,
-        }),
+        body: jsonEncode(payload),
       );
       if (response.statusCode == 200) {
         return jsonDecode(response.body);
@@ -252,7 +343,8 @@ class ApiService {
       try {
         final body = jsonDecode(response.body);
         throw Exception(
-          body['message'] ?? 'Failed to load analytics (${response.statusCode})',
+          body['message'] ??
+              'Failed to load analytics (${response.statusCode})',
         );
       } catch (e) {
         if (e is Exception) rethrow;
@@ -280,7 +372,9 @@ class ApiService {
         return {...data, '_offline': true};
       }
     } catch (_) {}
-    throw Exception('No internet connection and no cached analytics available.');
+    throw Exception(
+      'No internet connection and no cached analytics available.',
+    );
   }
 
   // Buddies: Add

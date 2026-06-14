@@ -135,7 +135,11 @@ class MainActivity : FlutterActivity() {
                     val durationSeconds = call.argument<Int>("durationSeconds") ?: (25 * 60)
                     val isBreak = call.argument<Boolean>("isBreak") ?: false
                     val timerMode = call.argument<String>("timerMode") ?: "countdown"
-                    startPomodoro(taskName, durationSeconds, isBreak, timerMode)
+                    val autoStartBreak = call.argument<Boolean>("autoStartBreak") ?: true
+                    val autoStartNextPomodoro = call.argument<Boolean>("autoStartNextPomodoro") ?: true
+                    val soundEnabled = call.argument<Boolean>("soundEnabled") ?: true
+                    val vibrationEnabled = call.argument<Boolean>("vibrationEnabled") ?: true
+                    startPomodoro(taskName, durationSeconds, isBreak, timerMode, autoStartBreak, autoStartNextPomodoro, soundEnabled, vibrationEnabled)
                     result.success(true)
                 }
                 "stopPomodoro" -> {
@@ -148,6 +152,9 @@ class MainActivity : FlutterActivity() {
                         val service = PomodoroOverlayService.instance
                         if (service != null) {
                             service.taskName = taskName
+                            // Refresh the overlay UI and notification to show the updated task name
+                            service.updateUI()
+                            service.updateNotification()
                             result.success(true)
                         } else {
                             result.success(false)
@@ -491,13 +498,26 @@ class MainActivity : FlutterActivity() {
         stopService(intent)
     }
 
-    private fun startPomodoro(taskName: String, durationSeconds: Int, isBreak: Boolean, timerMode: String = "countdown") {
+    private fun startPomodoro(
+        taskName: String,
+        durationSeconds: Int,
+        isBreak: Boolean,
+        timerMode: String = "countdown",
+        autoStartBreak: Boolean = true,
+        autoStartNextPomodoro: Boolean = true,
+        soundEnabled: Boolean = true,
+        vibrationEnabled: Boolean = true,
+    ) {
         val intent = Intent(this, PomodoroOverlayService::class.java).apply {
             action = PomodoroOverlayService.ACTION_START
             putExtra("taskName", taskName)
             putExtra("durationSeconds", durationSeconds)
             putExtra("isBreak", isBreak)
             putExtra("timerMode", timerMode)
+            putExtra("autoStartBreak", autoStartBreak)
+            putExtra("autoStartNextPomodoro", autoStartNextPomodoro)
+            putExtra("soundEnabled", soundEnabled)
+            putExtra("vibrationEnabled", vibrationEnabled)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(intent)

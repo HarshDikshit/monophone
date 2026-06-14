@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/launcher_state.dart';
+import '../services/task_planner_service.dart';
+import '../widgets/task_edit_sheet.dart';
 
 class PomodoroScreen extends StatefulWidget {
   const PomodoroScreen({super.key});
@@ -10,11 +12,6 @@ class PomodoroScreen extends StatefulWidget {
 }
 
 class _PomodoroScreenState extends State<PomodoroScreen> {
-  final _taskController = TextEditingController();
-  bool _isAddingTask = false;
-  bool _isRecurringNew = false;
-  int _targetPomodoros = 1;
-
   // Time picker wheel state (mm:ss)
   late int _pickerMinutes;
   late int _pickerSeconds;
@@ -29,7 +26,6 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
 
   @override
   void dispose() {
-    _taskController.dispose();
     super.dispose();
   }
 
@@ -58,252 +54,23 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
   void _showTaskEditSheet(
     BuildContext context,
     LauncherState state,
-    Map<String, dynamic> task,
+    Map<String, dynamic> taskMap,
   ) {
-    final editCtrl = TextEditingController(
-      text: task['title'] as String? ?? '',
-    );
-    int sheetEstPomos = (task['estimatedPomodoros'] as int?) ?? 1;
+    if (state.planner == null) return;
+    
+    // Find the actual TimeBlockTask from the planner
+    final taskId = taskMap['id'] as String;
+    final task = state.planner!.tasks.firstWhere((t) => t.id == taskId);
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.black,
-      shape: const Border(top: BorderSide(color: Colors.white12, width: 1)),
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheet) => Padding(
-          padding: EdgeInsets.only(
-            left: 24,
-            right: 24,
-            top: 24,
-            bottom: MediaQuery.of(ctx).viewInsets.bottom + 32,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Center(
-                child: Container(width: 36, height: 2, color: Colors.white24),
-              ),
-              const SizedBox(height: 20),
-              const Text(
-                'EDIT TASK',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontFamily: 'monospace',
-                  fontSize: 13,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 2,
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: editCtrl,
-                autofocus: true,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontFamily: 'monospace',
-                  fontSize: 14,
-                ),
-                cursorColor: Colors.white,
-                decoration: const InputDecoration(
-                  hintText: 'Task title…',
-                  hintStyle: TextStyle(color: Colors.white24),
-                  enabledBorder: UnderlineInputBorder(
-                    borderSide: BorderSide(color: Colors.white12),
-                  ),
-                  focusedBorder: UnderlineInputBorder(
-                    borderSide: BorderSide(color: Colors.white54),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 20),
-              Row(
-                children: [
-                  _statChip(
-                    '🍅 ${task['completedPomodoroCount'] ?? task['pomodoroCount'] ?? 0}',
-                    'COMPLETED',
-                  ),
-                  const SizedBox(width: 24),
-                  _statChip(
-                    '⏱ ${_formatMinutes(task['focusSeconds'] ?? 0)}',
-                    'FOCUS TIME',
-                  ),
-                ],
-              ),
-              const SizedBox(height: 20),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    'TARGET POMODOROS',
-                    style: TextStyle(
-                      color: Colors.white70,
-                      fontFamily: 'monospace',
-                      fontSize: 12,
-                      letterSpacing: 1,
-                    ),
-                  ),
-                  Row(
-                    children: [
-                      _stepperBtn('-', () {
-                        if (sheetEstPomos > 1) setSheet(() => sheetEstPomos--);
-                      }),
-                      Container(
-                        width: 40,
-                        alignment: Alignment.center,
-                        child: Text(
-                          '$sheetEstPomos',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontFamily: 'monospace',
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                      _stepperBtn('+', () {
-                        if (sheetEstPomos < 99) setSheet(() => sheetEstPomos++);
-                      }),
-                    ],
-                  ),
-                ],
-              ),
-              const SizedBox(height: 20),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    'RECURRING DAILY',
-                    style: TextStyle(
-                      color: Colors.white70,
-                      fontFamily: 'monospace',
-                      fontSize: 12,
-                      letterSpacing: 1,
-                    ),
-                  ),
-                  Switch(
-                    value: task['isRecurring'] ?? false,
-                    activeColor: Colors.white,
-                    activeTrackColor: Colors.white38,
-                    inactiveThumbColor: Colors.grey[700],
-                    inactiveTrackColor: Colors.white10,
-                    onChanged: (val) async {
-                      await state.toggleTaskRecurring(task['id'] as String);
-                      setSheet(() {});
-                    },
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: () async {
-                        final t = editCtrl.text.trim();
-                        if (t.isNotEmpty) {
-                          await state.modifyTask(task['id'] as String, t);
-                        }
-                        await state.updateTaskEstimatedPomodoros(
-                          task['id'] as String,
-                          sheetEstPomos,
-                        );
-                        if (ctx.mounted) Navigator.pop(ctx);
-                      },
-                      child: Container(
-                        height: 44,
-                        color: Colors.white,
-                        child: const Center(
-                          child: Text(
-                            'SAVE',
-                            style: TextStyle(
-                              color: Colors.black,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: 2,
-                              fontFamily: 'monospace',
-                              fontSize: 12,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  GestureDetector(
-                    onTap: () async {
-                      if (ctx.mounted) Navigator.pop(ctx);
-                      await state.deleteTask(task['id'] as String);
-                    },
-                    child: Container(
-                      height: 44,
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                      decoration: BoxDecoration(
-                        border: Border.all(color: Colors.red.withOpacity(0.5)),
-                      ),
-                      child: const Center(
-                        child: Text(
-                          'DELETE',
-                          style: TextStyle(
-                            color: Colors.red,
-                            fontFamily: 'monospace',
-                            fontSize: 12,
-                            letterSpacing: 2,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _statChip(String value, String label) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          value,
-          style: const TextStyle(
-            color: Colors.white,
-            fontFamily: 'monospace',
-            fontSize: 16,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        Text(
-          label,
-          style: const TextStyle(
-            color: Colors.white38,
-            fontFamily: 'monospace',
-            fontSize: 9,
-            letterSpacing: 1,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _stepperBtn(String label, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 32,
-        height: 32,
-        decoration: BoxDecoration(border: Border.all(color: Colors.white24)),
-        alignment: Alignment.center,
-        child: Text(
-          label,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 18,
-            fontFamily: 'monospace',
-          ),
-        ),
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => TaskEditSheet(
+        existing: task,
+        initialDate: DateTime.now(),
+        planner: state.planner!,
+        pomoDurationMins: state.customDurationSeconds ~/ 60,
       ),
     );
   }
@@ -557,6 +324,14 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
               actions: [
                 IconButton(
                   icon: const Icon(
+                    Icons.settings,
+                    color: Colors.white30,
+                    size: 20,
+                  ),
+                  onPressed: () => _showSettingsSheet(context, state),
+                ),
+                IconButton(
+                  icon: const Icon(
                     Icons.bar_chart,
                     color: Colors.white30,
                     size: 20,
@@ -653,6 +428,26 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
+                      // ── Active task name (always shown when pomodoro is running) ──
+                      if (state.isPomodoroActive && !state.isBreak) ...[
+                        Text(
+                          state.activeTaskId != null
+                              ? (state.activeTask?['title'] as String? ??
+                                    state.lastGoal)
+                              : state.lastGoal.isNotEmpty
+                              ? state.lastGoal
+                              : 'FOCUS SESSION',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: Colors.white54,
+                            fontFamily: 'monospace',
+                            fontSize: isFullScreen ? 13 : 11,
+                            letterSpacing: 1,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                      ],
                       // ── Timer display ──
                       if (!state.isPomodoroActive)
                         _buildTimePicker(state)
@@ -813,7 +608,7 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
               GestureDetector(
                 onTap: () {
                   if (state.isPomodoroActive) {
-                    state.stopPomodoro();
+                    state.stopPomodoro(manual: true);
                   } else {
                     state.startPomodoro();
                   }
@@ -852,7 +647,7 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
                 GestureDetector(
                   onTap: () {
                     // Stop break, start new pomodoro
-                    state.stopPomodoro();
+                    state.stopPomodoro(manual: true);
                     // Briefly delay then start a new pomodoro
                     Future.delayed(const Duration(milliseconds: 300), () {
                       state.startPomodoro();
@@ -908,6 +703,144 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
     return content;
   }
 
+  void _showSettingsSheet(BuildContext context, LauncherState state) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF111111),
+      shape: const Border(top: BorderSide(color: Colors.white12, width: 1)),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setSheet) {
+            return Consumer<LauncherState>(
+              builder: (context, state, _) {
+                return Padding(
+                  padding: EdgeInsets.only(
+                    left: 24,
+                    right: 24,
+                    top: 24,
+                    bottom: MediaQuery.of(context).viewInsets.bottom + 32,
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Center(
+                        child: Container(
+                          width: 36,
+                          height: 3,
+                          color: Colors.white24,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      const Text(
+                        'POMODORO SETTINGS',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontFamily: 'monospace',
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 2,
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      _settingToggle(
+                        'Auto-start next pomodoro',
+                        'Automatically start next focus session after break ends',
+                        state.autoStartNextPomodoro,
+                        (val) {
+                          state.setAutoStartNextPomodoro(val);
+                          setSheet(() {});
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      _settingToggle(
+                        'Auto-start break',
+                        'Automatically start break when pomodoro completes',
+                        state.autoStartBreak,
+                        (val) {
+                          state.setAutoStartBreak(val);
+                          setSheet(() {});
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      _settingToggle(
+                        'Vibration',
+                        'Vibrate when pomodoro/break starts',
+                        state.vibrationEnabled,
+                        (val) {
+                          state.setVibrationEnabled(val);
+                          setSheet(() {});
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      _settingToggle(
+                        'Sound',
+                        'Play alert sound when pomodoro/break starts',
+                        state.soundEnabled,
+                        (val) {
+                          state.setSoundEnabled(val);
+                          setSheet(() {});
+                        },
+                      ),
+                      const SizedBox(height: 24),
+                    ],
+                  ),
+                );
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _settingToggle(
+    String title,
+    String subtitle,
+    bool value,
+    ValueChanged<bool> onChanged,
+  ) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(border: Border.all(color: Colors.white10)),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontFamily: 'monospace',
+                    fontSize: 12,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: const TextStyle(
+                    color: Colors.white38,
+                    fontFamily: 'monospace',
+                    fontSize: 8,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Switch(
+            value: value,
+            onChanged: onChanged,
+            activeColor: Colors.white,
+            activeTrackColor: Colors.white38,
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showTaskSelectionModal(BuildContext context, LauncherState state) {
     showModalBottomSheet(
       context: context,
@@ -939,11 +872,12 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
                             ),
                           ),
                           GestureDetector(
-                            onTap: () => setModalState(
-                              () => _isAddingTask = !_isAddingTask,
-                            ),
-                            child: Icon(
-                              _isAddingTask ? Icons.close : Icons.add_circle,
+                            onTap: () {
+                              Navigator.pop(ctx);
+                              Navigator.pushNamed(context, '/planner');
+                            },
+                            child: const Icon(
+                              Icons.add_circle,
                               color: Colors.redAccent,
                               size: 24,
                             ),
@@ -951,140 +885,6 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
                         ],
                       ),
                       const SizedBox(height: 16),
-                      if (_isAddingTask) ...[
-                        TextField(
-                          controller: _taskController,
-                          autofocus: true,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontFamily: 'monospace',
-                            fontSize: 13,
-                          ),
-                          decoration: const InputDecoration(
-                            hintText: 'New task…',
-                            hintStyle: TextStyle(color: Colors.white24),
-                            enabledBorder: UnderlineInputBorder(
-                              borderSide: BorderSide(color: Colors.white12),
-                            ),
-                            focusedBorder: UnderlineInputBorder(
-                              borderSide: BorderSide(color: Colors.white38),
-                            ),
-                          ),
-                          onSubmitted: (val) async {
-                            if (val.trim().isNotEmpty) {
-                              await modalState.addTask(
-                                val.trim(),
-                                isRecurring: _isRecurringNew,
-                                estimatedPomodoros: _targetPomodoros,
-                              );
-                              _taskController.clear();
-                              setModalState(() {
-                                _isAddingTask = false;
-                                _isRecurringNew = false;
-                                _targetPomodoros = 1;
-                              });
-                            }
-                          },
-                        ),
-                        const SizedBox(height: 12),
-                        Row(
-                          children: [
-                            GestureDetector(
-                              onTap: () => setModalState(
-                                () => _isRecurringNew = !_isRecurringNew,
-                              ),
-                              child: Container(
-                                width: 36,
-                                height: 36,
-                                decoration: BoxDecoration(
-                                  border: Border.all(
-                                    color: _isRecurringNew
-                                        ? Colors.white54
-                                        : Colors.white12,
-                                  ),
-                                ),
-                                child: Center(
-                                  child: Text(
-                                    '∞',
-                                    style: TextStyle(
-                                      color: _isRecurringNew
-                                          ? Colors.white
-                                          : Colors.white24,
-                                      fontSize: 18,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                            const Spacer(),
-                            const Text(
-                              'TARGET  ',
-                              style: TextStyle(
-                                color: Colors.white54,
-                                fontFamily: 'monospace',
-                                fontSize: 11,
-                                letterSpacing: 1,
-                              ),
-                            ),
-                            _stepperBtn('-', () {
-                              if (_targetPomodoros > 1)
-                                setModalState(() => _targetPomodoros--);
-                            }),
-                            Container(
-                              width: 40,
-                              alignment: Alignment.center,
-                              child: Text(
-                                '$_targetPomodoros 🍅',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontFamily: 'monospace',
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                            _stepperBtn('+', () {
-                              if (_targetPomodoros < 99)
-                                setModalState(() => _targetPomodoros++);
-                            }),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        GestureDetector(
-                          onTap: () async {
-                            final val = _taskController.text.trim();
-                            if (val.isNotEmpty) {
-                              await modalState.addTask(
-                                val,
-                                isRecurring: _isRecurringNew,
-                                estimatedPomodoros: _targetPomodoros,
-                              );
-                              _taskController.clear();
-                              setModalState(() {
-                                _isAddingTask = false;
-                                _isRecurringNew = false;
-                                _targetPomodoros = 1;
-                              });
-                            }
-                          },
-                          child: Container(
-                            height: 40,
-                            color: Colors.white,
-                            alignment: Alignment.center,
-                            child: const Text(
-                              'ADD TASK',
-                              style: TextStyle(
-                                color: Colors.black,
-                                fontFamily: 'monospace',
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                                letterSpacing: 2,
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                      ],
                       Expanded(
                         child: modalState.tasks.isEmpty
                             ? Center(
@@ -1106,11 +906,8 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
                                   return GestureDetector(
                                     onLongPress: () {
                                       Navigator.pop(ctx);
-                                      _showTaskEditSheet(
-                                        context,
-                                        modalState,
-                                        task,
-                                      );
+                                      Navigator.pop(context);
+                                      Navigator.pushNamed(context, '/planner');
                                     },
                                     onTap: () {
                                       modalState.switchActiveTask(
@@ -1130,6 +927,43 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
                                       ),
                                       child: Row(
                                         children: [
+                                          // Completion toggle circle
+                                          GestureDetector(
+                                            onTap: () {
+                                              modalState.toggleTaskComplete(
+                                                task['id'] as String,
+                                              );
+                                            },
+                                            child: Container(
+                                              width: 20,
+                                              height: 20,
+                                              margin: const EdgeInsets.only(
+                                                right: 12,
+                                              ),
+                                              decoration: BoxDecoration(
+                                                shape: BoxShape.circle,
+                                                color: (task['isDone'] == true)
+                                                    ? Colors.green.withOpacity(
+                                                        0.2,
+                                                      )
+                                                    : Colors.transparent,
+                                                border: Border.all(
+                                                  color:
+                                                      (task['isDone'] == true)
+                                                      ? Colors.green
+                                                      : Colors.white24,
+                                                  width: 1.5,
+                                                ),
+                                              ),
+                                              child: (task['isDone'] == true)
+                                                  ? const Icon(
+                                                      Icons.check,
+                                                      size: 13,
+                                                      color: Colors.green,
+                                                    )
+                                                  : null,
+                                            ),
+                                          ),
                                           Expanded(
                                             child: Column(
                                               crossAxisAlignment:
@@ -1139,10 +973,20 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
                                                   task['title'] as String? ??
                                                       '',
                                                   style: TextStyle(
-                                                    color: isActive
-                                                        ? Colors.white
-                                                        : Colors.grey[400],
+                                                    color:
+                                                        (task['isDone'] == true)
+                                                        ? Colors.green
+                                                              .withOpacity(0.7)
+                                                        : (isActive
+                                                              ? Colors.white
+                                                              : Colors
+                                                                    .grey[400]),
                                                     fontSize: 14,
+                                                    decoration:
+                                                        (task['isDone'] == true)
+                                                        ? TextDecoration
+                                                              .lineThrough
+                                                        : null,
                                                   ),
                                                 ),
                                                 const SizedBox(height: 6),

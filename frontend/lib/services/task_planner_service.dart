@@ -59,6 +59,7 @@ class TimeBlockTask {
   bool isRecurring;
   List<int> recurringDays; // days of week (1=Mon..7=Sun)
   bool isCompleted;
+  bool isAlarmEnabled;
   int focusSeconds;
   int completedPomodoros;
 
@@ -78,6 +79,7 @@ class TimeBlockTask {
     this.isRecurring = false,
     this.recurringDays = const [],
     this.isCompleted = false,
+    this.isAlarmEnabled = true,
     this.focusSeconds = 0,
     this.completedPomodoros = 0,
   });
@@ -93,6 +95,7 @@ class TimeBlockTask {
     'isRecurring': isRecurring,
     'recurringDays': recurringDays,
     'isCompleted': isCompleted,
+    'isAlarmEnabled': isAlarmEnabled,
     'focusSeconds': focusSeconds,
     'completedPomodoros': completedPomodoros,
   };
@@ -111,6 +114,7 @@ class TimeBlockTask {
     isRecurring: json['isRecurring'] as bool? ?? false,
     recurringDays: List<int>.from(json['recurringDays'] as List? ?? []),
     isCompleted: json['isCompleted'] as bool? ?? false,
+    isAlarmEnabled: json['isAlarmEnabled'] as bool? ?? true,
     focusSeconds: json['focusSeconds'] as int? ?? 0,
     completedPomodoros: json['completedPomodoros'] as int? ?? 0,
   );
@@ -126,6 +130,7 @@ class TimeBlockTask {
     bool? isRecurring,
     List<int>? recurringDays,
     bool? isCompleted,
+    bool? isAlarmEnabled,
     int? focusSeconds,
     int? completedPomodoros,
   }) => TimeBlockTask(
@@ -139,6 +144,7 @@ class TimeBlockTask {
     isRecurring: isRecurring ?? this.isRecurring,
     recurringDays: recurringDays ?? this.recurringDays,
     isCompleted: isCompleted ?? this.isCompleted,
+    isAlarmEnabled: isAlarmEnabled ?? this.isAlarmEnabled,
     focusSeconds: focusSeconds ?? this.focusSeconds,
     completedPomodoros: completedPomodoros ?? this.completedPomodoros,
   );
@@ -155,6 +161,15 @@ class TaskPlannerService extends ChangeNotifier {
 
   int _pomodoroDuration = 25;
   int get pomodoroDuration => _pomodoroDuration;
+
+  /// Get task by ID
+  TimeBlockTask? getTaskById(String id) {
+    try {
+      return _tasks.firstWhere((t) => t.id == id);
+    } catch (_) {
+      return null;
+    }
+  }
 
   /// Get tasks for a specific date
   List<TimeBlockTask> tasksForDate(DateTime date) {

@@ -7,11 +7,18 @@ import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.media.AudioAttributes
+import android.media.MediaPlayer
+import android.media.RingtoneManager
+import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -103,6 +110,11 @@ class PomodoroOverlayService : Service() {
         handler.post(tickRunnable)
     }
 
+    var autoStartBreak = true
+    var autoStartNextPomodoro = true
+    var soundEnabled = true
+    var vibrationEnabled = true
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START -> {
@@ -111,6 +123,10 @@ class PomodoroOverlayService : Service() {
                 timerMode = intent.getStringExtra("timerMode") ?: "countdown"
                 totalDurationSeconds = duration
                 isBreak = intent.getBooleanExtra("isBreak", false)
+                autoStartBreak = intent.getBooleanExtra("autoStartBreak", true)
+                autoStartNextPomodoro = intent.getBooleanExtra("autoStartNextPomodoro", true)
+                soundEnabled = intent.getBooleanExtra("soundEnabled", true)
+                vibrationEnabled = intent.getBooleanExtra("vibrationEnabled", true)
                 isRunning = true
                 isPaused = false
                 
@@ -152,23 +168,110 @@ class PomodoroOverlayService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    private var mediaPlayer: MediaPlayer? = null
+
+    private fun playAlertSound() {
+        if (!soundEnabled) return
+        try {
+            mediaPlayer?.release()
+            val afd = applicationContext.resources.openRawResourceFd(R.raw.alert)
+            mediaPlayer = MediaPlayer().apply {
+                setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
+                afd.close()
+                setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .setUsage(AudioAttributes.USAGE_ALARM)
+                        .build()
+                )
+                isLooping = false
+                prepare()
+                start()
+                // Stop after 3 seconds
+                handler.postDelayed({
+                    try {
+                        if (isPlaying) { stop(); release() }
+                    } catch (_: Exception) {}
+                }, 3000)
+                setOnCompletionListener { release() }
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun vibrate() {
+        if (!vibrationEnabled) return
+        try {
+            val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val vm = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
+                vm.defaultVibrator
+            } else {
+                @Suppress("DEPRECATION") getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator.vibrate(
+                    VibrationEffect.createOneShot(500, VibrationEffect.DEFAULT_AMPLITUDE)
+                )
+            } else {
+                @Suppress("DEPRECATION") vibrator.vibrate(500)
+            }
+        } catch (_: Exception) {}
+    }
+
     private fun handleTimerComplete() {
         // Count-up mode never auto-completes — user must stop manually
         if (timerMode == "countup") return
         
-        if (!isBreak) {
-            // Focus ended -> Start break
-            isBreak = true
-            secondsRemaining = 5 * 60
-            taskName = "Break Time"
-        } else {
-            // Break ended -> Start focus
-            isBreak = false
-            secondsRemaining = totalDurationSeconds
-            taskName = "Focus Block"
-        }
+        // Play sound and vibrate on timer completion
+        playAlertSound()
+        vibrate()
         
-        notifyStateChanged()
+        if (!isBreak) {
+            // Focus ended -> Start break ONLY if auto-start break is enabled
+            if (autoStartBreak) {
+                isBreak = true
+                secondsRemaining = 5 * 60
+                taskName = "Break Time"
+                // Restart native timer with break
+                val intent = Intent(this, PomodoroOverlayService::class.java).apply {
+                    action = ACTION_START
+                    putExtra("taskName", taskName)
+                    putExtra("durationSeconds", secondsRemaining)
+                    putExtra("isBreak", true)
+                    putExtra("timerMode", timerMode)
+                    putExtra("autoStartBreak", autoStartBreak)
+                    putExtra("autoStartNextPomodoro", autoStartNextPomodoro)
+                    putExtra("soundEnabled", soundEnabled)
+                    putExtra("vibrationEnabled", vibrationEnabled)
+                }
+                startService(intent)
+            } else {
+                // Stop & notify user to manually start break
+                stopPomodoro()
+            }
+        } else {
+            // Break ended -> Start next focus ONLY if auto-start next is enabled
+            if (autoStartNextPomodoro) {
+                isBreak = false
+                secondsRemaining = totalDurationSeconds
+                taskName = "Focus Block"
+                // Restart native timer with focus
+                val intent = Intent(this, PomodoroOverlayService::class.java).apply {
+                    action = ACTION_START
+                    putExtra("taskName", taskName)
+                    putExtra("durationSeconds", secondsRemaining)
+                    putExtra("isBreak", false)
+                    putExtra("timerMode", timerMode)
+                    putExtra("autoStartBreak", autoStartBreak)
+                    putExtra("autoStartNextPomodoro", autoStartNextPomodoro)
+                    putExtra("soundEnabled", soundEnabled)
+                    putExtra("vibrationEnabled", vibrationEnabled)
+                }
+                startService(intent)
+            } else {
+                // Stop & notify user to manually start next pomodoro
+                stopPomodoro()
+            }
+        }
     }
 
     private fun stopPomodoro() {
@@ -450,7 +553,7 @@ class PomodoroOverlayService : Service() {
         }
     }
 
-    private fun updateUI() {
+    fun updateUI() {
         val minutes = secondsRemaining / 60
         val seconds = secondsRemaining % 60
         val timeStr = String.format("%02d:%02d", minutes, seconds)
@@ -498,8 +601,6 @@ class PomodoroOverlayService : Service() {
         val remoteViews = RemoteViews(packageName, R.layout.custom_pomodoro_notification)
 
         // --- Update text fields: secondsRemaining is always the display value ---
-        // - countdown: secondsRemaining = remaining
-        // - countup:   secondsRemaining = elapsed
         val minutes = secondsRemaining / 60
         val seconds = secondsRemaining % 60
         val timeStr = String.format("%02d:%02d", minutes, seconds)
@@ -528,8 +629,10 @@ class PomodoroOverlayService : Service() {
         remoteViews.setOnClickPendingIntent(R.id.btn_play_pause, playPausePendingIntent)
         remoteViews.setOnClickPendingIntent(R.id.btn_stop, stopPendingIntent)
 
+        // Use the app logo as the small icon in the notification bar
+        // The large logo is already shown in the custom layout via @drawable/notification_logo
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_media_play)
+            .setSmallIcon(R.drawable.notification_logo)
             .setContentIntent(contentIntent)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setOngoing(true)
@@ -540,7 +643,7 @@ class PomodoroOverlayService : Service() {
         return builder.build()
     }
 
-    private fun updateNotification() {
+    fun updateNotification() {
         if (!isRunning && !isPaused) return
         try {
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager

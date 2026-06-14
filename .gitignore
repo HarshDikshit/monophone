@@ -16,7 +16,6 @@ build/
 *.swp
 *.swo
 *~
-
 # Android
 **/local.properties
 **/key.properties
@@ -82,3 +81,4 @@ OTA_UPDATE_SETUP.md
 PRODUCTION_DEPLOYMENT_GUIDE.md
 PRODUCTION_LAUNCH_CHECKLIST.md
 PRODUCTION_MAINTENANCE.md
+TERMINAL_COMMANDS.md

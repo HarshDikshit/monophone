@@ -216,7 +216,7 @@ class _FocusTubeBlockerScreenState extends State<FocusTubeBlockerScreen> {
               GestureDetector(
                 onTap: () {
                   if (state.isPomodoroActive) {
-                    state.stopPomodoro();
+                    state.stopPomodoro(manual: true);
                   } else {
                     state.startPomodoro();
                   }
