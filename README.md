@@ -4,6 +4,15 @@ Monophone is a premium, distraction-free minimalist launcher built using Flutter
 
 ---
 
+## 💬 Join the Community & Give Feedback
+
+Since this app is completely open-source and currently in its early stages, your feedback shapes its future! 
+
+*   **Got a bug or crash?** Open a [Bug Report](https://github.com/HarshDikshit/monophone/issues) (Please include your device and Android version!).
+*   **Have an idea for a feature?** Drop it in our [Feature Requests Discussion](https://github.com/HarshDikshit/monophone/discussions/categories/-feature-requests-ideas).
+*   **Want to show off your clean screen?** Share a screenshot in [Show and Tell](https://github.com/HarshDikshit/monophone/discussions/categories/show-and-tell).
+*   **Want to contribute code?** Check out our open issues labeled `good first issue` or `help wanted`!
+
 ## 🚀 Download & Installation (v1.0.1)
 
 To get Monophone running on your device right now, download our optimized production binaries directly from our official release pipeline below:
