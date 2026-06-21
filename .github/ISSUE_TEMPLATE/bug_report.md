@@ -1,0 +1,50 @@
+---
+name: Bug report
+about: Create a report to help us improve
+title: ''
+labels: ''
+assignees: ''
+
+---
+
+name: "🐛 Bug Report"
+description: File a bug report to help improve the app
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to fill out this bug report! Please provide as much detail as possible.
+  - type: textarea
+    id: description
+    attributes:
+      label: Description of the Bug
+      description: A clear and concise description of what the bug is.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: 1. Go to '...' | 2. Click on '...' | 3. Scroll down to '...' | 4. See error
+    validations:
+      required: true
+  - type: input
+    id: Device
+    attributes:
+      label: Device Information
+      placeholder: e.g., Google Pixel 7, Samsung S23
+    validations:
+      required: true
+  - type: input
+    id: Android
+    attributes:
+      label: Android Version
+      placeholder: e.g., Android 13, Android 14 (LineageOS)
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logcat / Stacktrace
+      description: Paste any relevant crash logs here if available (wrap in code blocks).
