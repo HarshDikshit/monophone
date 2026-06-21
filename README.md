@@ -42,4 +42,4 @@ If you want to run the project locally or contribute to the repository:
 
 1. **Clone the repository:**
 ```bash
-   git clone [https://github.com/HarshDikshit/monophone.git](https://github.com/HarshDikshit/monophone.git)
+   git clone https://github.com/HarshDikshit/monophone.git
