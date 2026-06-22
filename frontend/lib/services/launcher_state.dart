@@ -378,76 +378,23 @@ class LauncherState extends ChangeNotifier {
     await fetchUserProfile();
     await updateAIHeadline();
 
-    // Initialize blocker configs and start monitoring programmatically on startup
+    // Kill any persistent native monitoring and blocking from a prior session.
+    // This ensures the app does NOT silently block apps like Instagram
+    // even if a pomodoro was previously running (hidden hard lock).
     try {
-      final blocker = BlockerService.instance;
-      final blockedPackageNames = <String>{};
-      for (final app in blocker.unproductiveAppNames) {
-        final match = _allApps.firstWhere(
-          (element) =>
-              (element['name'] ?? '').toLowerCase().trim() ==
-              app.toLowerCase().trim(),
-          orElse: () => <String, String>{},
-        );
-        if (match.isNotEmpty && match['packageName'] != null) {
-          blockedPackageNames.add(match['packageName']!);
-        }
-      }
-      if (blocker.blockReelsShorts) {
-        for (final app in _allApps) {
-          final name = (app['name'] ?? '').toLowerCase().trim();
-          if (name.contains('instagram') ||
-              name.contains('youtube') ||
-              name.contains('tiktok') ||
-              name.contains('facebook') ||
-              name.contains('reels') ||
-              name.contains('shorts')) {
-            blockedPackageNames.add(app['packageName']!);
-          }
-        }
-      }
-
-      final dailyLimitsMap = <String, int>{};
-      blocker.dailyLimits.forEach((appName, minutes) {
-        final match = _allApps.firstWhere(
-          (element) =>
-              (element['name'] ?? '').toLowerCase().trim() ==
-              appName.toLowerCase().trim(),
-          orElse: () => <String, String>{},
-        );
-        if (match.isNotEmpty && match['packageName'] != null) {
-          dailyLimitsMap[match['packageName']!] = minutes;
-          blockedPackageNames.add(match['packageName']!);
-        }
+      await _channel.invokeMethod('stopMonitoring');
+      await _channel.invokeMethod('stopDailyMonitoring');
+      await _channel.invokeMethod('configureBlockingRules', {
+        'blockedPackages': <String>[],
+        'dailyLimits': <String, int>{},
+        'blockFirstShort': false,
+        'restrictedKeywords': <String>[],
+        'emergencyUseMaxCounts': <String, int>{},
       });
-
-      // Build emergency use max count map by package name
-      final emergencyUseMaxMap = <String, int>{};
-      blocker.emergencyUseCounts.forEach((appName, count) {
-        final match = _allApps.firstWhere(
-          (element) =>
-              (element['name'] ?? '').toLowerCase().trim() ==
-              appName.toLowerCase().trim(),
-          orElse: () => <String, String>{},
-        );
-        if (match.isNotEmpty && match['packageName'] != null) {
-          emergencyUseMaxMap[match['packageName']!] = count;
-        }
-      });
-
-      await configureBlockingRules(
-        blockedPackages: blockedPackageNames,
-        dailyLimits: dailyLimitsMap,
-        blockFirstShort: blocker.blockReelsShorts,
-        restrictedKeywords: blocker.restrictedKeywords.toSet(),
-        emergencyUseMaxCounts: emergencyUseMaxMap,
-      );
-
-      await startDailyMonitoring();
-      await toggleVpn(blocker.vpnContentFilterEnabled);
-      await toggleSystemGrayscale(blocker.monochromeModeEnabled);
+      await toggleVpn(false);
+      await toggleSystemGrayscale(false);
     } catch (e) {
-      debugPrint("Error initializing blocker service on startup: $e");
+      debugPrint("Error clearing native blocker on startup: $e");
     }
   }
 
@@ -934,14 +881,9 @@ class LauncherState extends ChangeNotifier {
         .where((pkg) => pkg.isNotEmpty)
         .toSet();
 
-    final allBlockedPackages = {
-      ..._distractionApps,
-      ...focusTubePackages,
-      ...reelsPackages,
-    };
-    await _channel.invokeMethod('startMonitoring', {
-      'blockedApps': allBlockedPackages.toList(),
-    });
+    // NOTE: No startMonitoring() call — we intentionally removed the native
+    // app-blocking hard lock. Pomodoro is a soft focus timer only; it does
+    // NOT forcefully block apps on the native side.
 
     await _channel.invokeMethod('startPomodoro', {
       'taskName': _lastGoal.isNotEmpty ? _lastGoal : "Focus Session",
