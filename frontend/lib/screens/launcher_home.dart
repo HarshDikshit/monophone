@@ -1678,6 +1678,39 @@ class _LauncherHomeState extends State<LauncherHome>
                           fontFamily: 'monospace',
                         ),
                       ),
+                      const SizedBox(height: 24),
+                      GestureDetector(
+                        onTap: () async {
+                          await state.skipDefaultLauncher();
+                        },
+                        child: Container(
+                          height: 50,
+                          decoration: BoxDecoration(
+                            border: Border.all(color: Colors.white30),
+                          ),
+                          child: const Center(
+                            child: Text(
+                              'SKIP',
+                              style: TextStyle(
+                                color: Colors.white38,
+                                letterSpacing: 2,
+                                fontFamily: 'monospace',
+                                fontSize: 11,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Skip - I\'ll set it up later',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.white24,
+                          fontSize: 10,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
                     ],
                   ),
                 ],

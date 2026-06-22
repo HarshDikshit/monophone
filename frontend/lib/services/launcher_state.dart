@@ -997,7 +997,6 @@ class LauncherState extends ChangeNotifier {
       _autoStartBreak = false;
       await _saveTimerPreferences();
     }
-
     await _channel.invokeMethod('stopMonitoring');
     await _channel.invokeMethod('stopPomodoro');
 
@@ -1116,6 +1115,15 @@ class LauncherState extends ChangeNotifier {
     try {
       await _channel.invokeMethod('requestDefaultLauncher');
     } catch (_) {}
+  }
+
+  /// Skip the default launcher requirement. Saves to SharedPreferences so the
+  /// user won't be prompted again on subsequent launches.
+  Future<void> skipDefaultLauncher() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('launcher_skip_default', true);
+    _skipDefaultLauncher = true;
+    notifyListeners();
   }
 
   Future<bool> checkAccessibilityPermission() async {
