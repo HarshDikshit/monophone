@@ -90,11 +90,11 @@ class _PermissionsDialogState extends State<PermissionsDialog>
     setState(() => _perms = updated);
     widget.onRefresh?.call();
 
-    // If all granted now, auto-close after a moment
+    // Note: We no longer auto-close when all granted. The user can
+    // manually tap Continue or use the back button to dismiss.
+    // This lets them see the "all granted" state.
     if (updated.values.every((v) => v == true)) {
-      _autoRecheckTimer = Timer(const Duration(milliseconds: 300), () {
-        if (mounted) Navigator.pop(context, true);
-      });
+      // Just update the UI state, no auto-pop
     }
   }
 
@@ -114,7 +114,7 @@ class _PermissionsDialogState extends State<PermissionsDialog>
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      canPop: _allGranted,
+      canPop: true,
       child: Scaffold(
         backgroundColor: Colors.black,
         body: SafeArea(
@@ -218,9 +218,7 @@ class _PermissionsDialogState extends State<PermissionsDialog>
                               ),
                             ),
                             GestureDetector(
-                              onTap: granted
-                                  ? null
-                                  : () => _requestPermission(name),
+                              onTap: () => _requestPermission(name),
                               child: Container(
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: 12,
