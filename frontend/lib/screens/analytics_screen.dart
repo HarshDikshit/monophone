@@ -1040,8 +1040,8 @@ class _SessionTimelinePainter extends CustomPainter {
       final definedSec = (s['definedSeconds'] as num? ?? actualSec).toDouble();
       if (definedSec <= 0) continue;
 
-      // Calculate X position (0-24h)
-      final hourFrac = startTime.hour + (startTime.minute / 60.0);
+      // Calculate X position (0-24h) with second precision for alignment
+      final hourFrac = startTime.hour + (startTime.minute / 60.0) + (startTime.second / 3600.0);
       final startX = hourFrac * hrW;
       
       // Calculate width (proportional to defined duration)

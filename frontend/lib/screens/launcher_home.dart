@@ -73,6 +73,9 @@ class _LauncherHomeState extends State<LauncherHome>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      // Ensure any active text field is unfocused so the keyboard doesn't open
+      // automatically when returning to the home screen.
+      FocusManager.instance.primaryFocus?.unfocus();
       Provider.of<LauncherState>(context, listen: false).handleResume();
     }
   }
@@ -1974,39 +1977,6 @@ class _LauncherHomeState extends State<LauncherHome>
                         ),
                         const SizedBox(height: 24),
 
-                        // Search bar / Filter Apps
-                        TextField(
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontFamily: 'monospace',
-                            fontSize: 13,
-                          ),
-                          cursorColor: Colors.white,
-                          decoration: InputDecoration(
-                            hintText: 'SEARCH APPS...',
-                            hintStyle: TextStyle(
-                              color: Colors.grey[800],
-                              letterSpacing: 1.5,
-                            ),
-                            prefixIcon: const Icon(
-                              Icons.search,
-                              color: Colors.white24,
-                              size: 18,
-                            ),
-                            enabledBorder: const UnderlineInputBorder(
-                              borderSide: BorderSide(color: Colors.white10),
-                            ),
-                            focusedBorder: const UnderlineInputBorder(
-                              borderSide: BorderSide(color: Colors.white54),
-                            ),
-                          ),
-                          onChanged: (value) {
-                            setState(() {
-                              _searchQuery = value;
-                            });
-                          },
-                        ),
-                        const SizedBox(height: 16),
 
                         // 5. Apps list Center
                         Expanded(

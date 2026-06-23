@@ -524,14 +524,21 @@ class LauncherState extends ChangeNotifier {
       _pomoSessions.add({
         'startTime': _currentSessionStart!.toIso8601String(),
         'endTime': now.toIso8601String(),
-        'definedSeconds':
-            _currentSessionDefinedSeconds ?? _pomodoroTotalDurationSeconds,
+        // We use taskSeconds for both to show a solid block in the timeline
+        // representing the ACTUAL focus time during this segment.
+        'definedSeconds': taskSeconds,
         'actualSeconds': taskSeconds,
         'taskId': _activeTaskId,
         'title': _lastGoal,
         'isBreak': _isBreak,
       });
-      _currentSessionStart = null;
+
+      // If we are still focused, reset start time to now for the NEXT segment
+      if (_isPomodoroActive) {
+        _currentSessionStart = now;
+      } else {
+        _currentSessionStart = null;
+      }
       _currentSessionDefinedSeconds = null;
     }
 
@@ -997,9 +1004,8 @@ class LauncherState extends ChangeNotifier {
   void pausePomodoro() async {
     if (!_isPomodoroActive) return;
 
-    // Save remaining seconds before stopping native timer
-    final savedSeconds = _pomodoroSecondsRemaining;
-    final savedDuration = _pomodoroTotalDurationSeconds;
+    // Commit any pending progress before stopping
+    await _commitPomodoroProgress();
 
     await _channel.invokeMethod('stopPomodoro');
 
