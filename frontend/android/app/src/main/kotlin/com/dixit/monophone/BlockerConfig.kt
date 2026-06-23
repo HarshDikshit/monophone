@@ -32,12 +32,15 @@ object BlockerConfig {
     val dailyLimitsInMinutes: Map<String, Int> get() = _dailyLimitsInMinutes.get()
 
     /**
-     * Toggle for Smart Reels/Shorts blocker:
-     *   true  → Block from the very first Reel/Short video detected. (Toggle A)
-     *   false → Allow the first one, then block after the next scroll (Toggle B).
+     * Per-package toggle for Smart Reels/Shorts blocker:
+     *   true  → Allow the first one, then block after the next scroll (Toggle B).
+     *   false → Block from the very first Reel/Short video detected. (Toggle A)
      */
-    private val _blockFirstShort = AtomicReference(true)
-    val blockFirstShort: Boolean get() = _blockFirstShort.get()
+    private val _allowOneShortMap = AtomicReference<Map<String, Boolean>>(emptyMap())
+    
+    fun shouldAllowOneShort(packageName: String): Boolean {
+        return _allowOneShortMap.get()[packageName] ?: false
+    }
 
     /** Keywords that, when detected in a browser URL bar, trigger a block. */
     private val _restrictedKeywords = AtomicReference<Set<String>>(emptySet())
@@ -113,22 +116,17 @@ object BlockerConfig {
     /**
      * Atomically swap all configuration values.  Called from [MainActivity]
      * when Flutter invokes the `configureBlockingRules` method.
-     *
-     * @param blockedPackages Set of package names to monitor.
-     * @param dailyLimits Map of packageName → daily limit in minutes.
-     * @param blockFirstShort True = block 1st reel/short; false = block on scroll.
-     * @param restrictedKeywords Keywords to match in browser URL bars.
      */
     fun updateFromFlutter(
         blockedPackages: Set<String>,
         dailyLimits: Map<String, Int>,
-        blockFirstShort: Boolean,
+        allowOneShort: Map<String, Boolean>,
         restrictedKeywords: Set<String>,
         emergencyUseMaxCounts: Map<String, Int> = emptyMap()
     ) {
         _blockedPackages.set(blockedPackages.toSet())
         _dailyLimitsInMinutes.set(HashMap(dailyLimits))
-        _blockFirstShort.set(blockFirstShort)
+        _allowOneShortMap.set(HashMap(allowOneShort))
         _restrictedKeywords.set(restrictedKeywords.toSet())
         _emergencyUseMaxCounts.set(HashMap(emergencyUseMaxCounts))
     }

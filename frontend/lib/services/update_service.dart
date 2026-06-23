@@ -3,6 +3,7 @@ import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'api_service.dart';
 
 class UpdateService {
@@ -100,6 +101,18 @@ class UpdateService {
   /// Check for updates and return the update info if available
   static Future<Map<String, dynamic>?> checkForUpdate() async {
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final lastCheckTime = prefs.getInt('last_update_check_time') ?? 0;
+      final now = DateTime.now().millisecondsSinceEpoch;
+
+      // Only check once every 24 hours
+      if (now - lastCheckTime < 24 * 60 * 60 * 1000) {
+        debugPrint(
+          'Performance: Skipping update check (last check was < 24h ago)',
+        );
+        return null;
+      }
+
       final currentVersion = await getCurrentVersion();
       final versionInfo = await fetchLatestVersion();
 
@@ -111,6 +124,9 @@ class UpdateService {
       if (comparison > 0) {
         return versionInfo;
       }
+
+      // Record success check even if no update found
+      await prefs.setInt('last_update_check_time', now);
     } catch (e) {
       debugPrint('Error in checkForUpdate: $e');
     }

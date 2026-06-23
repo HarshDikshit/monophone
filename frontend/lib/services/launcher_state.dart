@@ -120,6 +120,11 @@ class LauncherState extends ChangeNotifier {
   bool _doubleTapOpenDrawer = false;
   bool get doubleTapOpenDrawer => _doubleTapOpenDrawer;
 
+  // Throttling timestamps
+  DateTime? _lastPermissionCheck;
+  DateTime? _lastSyncTime;
+  DateTime? _lastProfileFetch;
+
   bool _isDefaultLauncher = false;
   bool _skipDefaultLauncher = false;
   bool get isDefaultLauncher => _isDefaultLauncher || _skipDefaultLauncher;
@@ -665,10 +670,25 @@ class LauncherState extends ChangeNotifier {
   }
 
   Future<void> handleResume() async {
-    await _channel.invokeMethod('hasUsageAccessPermission');
+    final now = DateTime.now();
 
+    // Throttle native checks to at most once every 5 minutes
+    // OR if permissions were previously missing (to auto-detect grant)
+    final bool shouldCheckNative = _lastPermissionCheck == null ||
+        now.difference(_lastPermissionCheck!).inMinutes >= 5 ||
+        !_isDefaultLauncher; // Always check if not default yet
+
+    if (shouldCheckNative) {
+      debugPrint("Performance: Running throttled native permission checks");
+      await _channel.invokeMethod('hasUsageAccessPermission');
+      await checkDefaultLauncher();
+      _lastPermissionCheck = now;
+    } else {
+      debugPrint("Performance: Throttling native permission checks");
+    }
+
+    // ALWAYS stop distraction timer on resume to ensure state consistency
     await stopDistractionTimer();
-    await checkDefaultLauncher();
 
     if (_exitTime != null && _lastLaunchedPackage != null) {
       final now = DateTime.now();
@@ -771,7 +791,21 @@ class LauncherState extends ChangeNotifier {
         );
       }
 
-      await _syncStatsToBackend();
+      // Throttle backend sync to at most once every 10 minutes
+      // unless significant time was spent (handled by syncStatsToBackend internally or here)
+      final bool significantActivity = elapsed > 60;
+      final bool shouldSync = _lastSyncTime == null ||
+          now.difference(_lastSyncTime!).inMinutes >= 10 ||
+          significantActivity;
+
+      if (shouldSync) {
+        debugPrint(
+          "Performance: Syncing stats to backend (activity: $elapsed sec)",
+        );
+        await _syncStatsToBackend();
+      } else {
+        debugPrint("Performance: Throttling backend sync");
+      }
       notifyListeners();
     }
   }
@@ -802,9 +836,18 @@ class LauncherState extends ChangeNotifier {
         );
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('last_sync_date', today);
+        _lastSyncTime = DateTime.now();
 
-        await fetchUserProfile();
-        await updateAIHeadline();
+        // Throttle profile fetch and AI headlines to once an hour
+        final bool shouldFetchProfile = _lastProfileFetch == null ||
+            _lastSyncTime!.difference(_lastProfileFetch!).inHours >= 1;
+
+        if (shouldFetchProfile) {
+          debugPrint("Performance: Fetching profile and AI headline");
+          await fetchUserProfile();
+          await updateAIHeadline();
+          _lastProfileFetch = _lastSyncTime;
+        }
       } catch (e) {
         debugPrint("Failed to sync stats to backend: $e");
         await OfflineSyncService.instance.queueActivitySync(
@@ -1004,12 +1047,16 @@ class LauncherState extends ChangeNotifier {
   void pausePomodoro() async {
     if (!_isPomodoroActive) return;
 
+    // Save remaining seconds before stopping native timer
+    final savedSeconds = _pomodoroSecondsRemaining;
+    final savedDuration = _pomodoroTotalDurationSeconds;
+
     // Commit any pending progress before stopping
     await _commitPomodoroProgress();
 
     await _channel.invokeMethod('stopPomodoro');
 
-    // Keep isPomodoroActive true, just mark as not running
+    // Keep state true, just mark as not running
     _pomodoroSecondsRemaining = savedSeconds;
     _pomodoroTotalDurationSeconds = savedDuration;
     notifyListeners();
@@ -1184,7 +1231,7 @@ class LauncherState extends ChangeNotifier {
   Future<void> configureBlockingRules({
     required Set<String> blockedPackages,
     required Map<String, int> dailyLimits,
-    required bool blockFirstShort,
+    required Map<String, bool> allowOneShort,
     required Set<String> restrictedKeywords,
     Map<String, int>? emergencyUseMaxCounts,
   }) async {
@@ -1192,7 +1239,7 @@ class LauncherState extends ChangeNotifier {
       await _channel.invokeMethod('configureBlockingRules', {
         'blockedPackages': blockedPackages.toList(),
         'dailyLimits': dailyLimits,
-        'blockFirstShort': blockFirstShort,
+        'allowOneShort': allowOneShort,
         'restrictedKeywords': restrictedKeywords.toList(),
         'emergencyUseMaxCounts': emergencyUseMaxCounts ?? <String, int>{},
       });
@@ -1557,7 +1604,10 @@ class LauncherState extends ChangeNotifier {
 
   Future<void> updateBlockerSettings({
     required bool isStrictMode,
-    required bool blockReelsShorts,
+    required bool blockYoutubeShorts,
+    required bool blockInstagramReels,
+    required bool allowOneYoutubeShort,
+    required bool allowOneInstagramReel,
     required String unlockOption,
     DateTime? lockUntilDate,
     required bool vpnContentFilterEnabled,
@@ -1572,7 +1622,10 @@ class LauncherState extends ChangeNotifier {
   }) async {
     await BlockerService.instance.saveSettings(
       isStrictMode: isStrictMode,
-      blockReelsShorts: blockReelsShorts,
+      blockYoutubeShorts: blockYoutubeShorts,
+      blockInstagramReels: blockInstagramReels,
+      allowOneYoutubeShort: allowOneYoutubeShort,
+      allowOneInstagramReel: allowOneInstagramReel,
       unlockOption: unlockOption,
       lockUntilDate: lockUntilDate,
       vpnContentFilterEnabled: vpnContentFilterEnabled,
@@ -1600,16 +1653,34 @@ class LauncherState extends ChangeNotifier {
         blockedPackageNames.add(match['packageName']!);
       }
     }
-    if (blockReelsShorts) {
+    final allowOneShortMap = <String, bool>{};
+    
+    if (blockYoutubeShorts) {
       for (final app in _allApps) {
         final name = (app['name'] ?? '').toLowerCase().trim();
-        if (name.contains('instagram') ||
-            name.contains('youtube') ||
-            name.contains('tiktok') ||
-            name.contains('facebook') ||
-            name.contains('reels') ||
-            name.contains('shorts')) {
+        if (name.contains('youtube')) {
           blockedPackageNames.add(app['packageName']!);
+          allowOneShortMap[app['packageName']!] = allowOneYoutubeShort;
+        }
+      }
+    }
+    if (blockInstagramReels) {
+      for (final app in _allApps) {
+        final name = (app['name'] ?? '').toLowerCase().trim();
+        if (name.contains('instagram')) {
+          blockedPackageNames.add(app['packageName']!);
+          allowOneShortMap[app['packageName']!] = allowOneInstagramReel;
+        }
+      }
+    }
+    
+    // Fallback for tiktok/facebook if any block is enabled (legacy support)
+    if (blockYoutubeShorts || blockInstagramReels) {
+      for (final app in _allApps) {
+        final name = (app['name'] ?? '').toLowerCase().trim();
+        if (name.contains('tiktok') || name.contains('facebook')) {
+          blockedPackageNames.add(app['packageName']!);
+          allowOneShortMap[app['packageName']!] = false; // default to block completely
         }
       }
     }
@@ -1648,7 +1719,7 @@ class LauncherState extends ChangeNotifier {
     await configureBlockingRules(
       blockedPackages: blockedPackageNames,
       dailyLimits: dailyLimitsMap,
-      blockFirstShort: blockReelsShorts,
+      allowOneShort: allowOneShortMap,
       restrictedKeywords: restrictedKeywords.toSet(),
       emergencyUseMaxCounts: emergencyUseMaxMap,
     );
@@ -1693,5 +1764,21 @@ class LauncherState extends ChangeNotifier {
   void dismissBatteryPrompt() {
     _showBatteryPrompt = false;
     notifyListeners();
+  }
+
+  // ── Accessibility Service ──
+
+  Future<bool> isAccessibilityServiceEnabled() async {
+    try {
+      return await _channel.invokeMethod<bool>('isAccessibilityServiceEnabled') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> openAccessibilitySettings() async {
+    try {
+      await _channel.invokeMethod('openAccessibilitySettings');
+    } catch (_) {}
   }
 }

@@ -108,6 +108,8 @@ class DailyUsageMonitorService : Service() {
                     for (usage in allUsage) {
                         totalAccumulatedToday[usage.packageName] = usage.accumulatedSeconds
                     }
+                    // Update shared tracker with initial values
+                    UsageTracker.liveUsageSeconds = HashMap(totalAccumulatedToday)
                 }
             } catch (_: Exception) {}
         }
@@ -167,7 +169,10 @@ class DailyUsageMonitorService : Service() {
         // Reset the date if midnight has passed
         val currentDate = todayDateString()
         if (lastFlushedDate != null && lastFlushedDate != currentDate) {
-            synchronized(totalAccumulatedToday) { totalAccumulatedToday.clear() }
+            synchronized(totalAccumulatedToday) { 
+                totalAccumulatedToday.clear()
+                UsageTracker.liveUsageSeconds = emptyMap()
+            }
             pendingAccumulatorMs.clear()
         }
         lastFlushedDate = currentDate
@@ -223,6 +228,9 @@ class DailyUsageMonitorService : Service() {
                     if (newlyAdded > 0) {
                         totalAccumulatedToday[foreground] =
                             (totalAccumulatedToday[foreground] ?: 0) + newlyAdded
+                        
+                        // Push live update to shared tracker
+                        UsageTracker.updateLiveUsage(foreground, totalAccumulatedToday[foreground]!!)
                     }
                 }
             }
@@ -263,6 +271,7 @@ class DailyUsageMonitorService : Service() {
                     for (usage in allUsage) {
                         totalAccumulatedToday[usage.packageName] = usage.accumulatedSeconds
                     }
+                    UsageTracker.liveUsageSeconds = HashMap(totalAccumulatedToday)
                 }
             } catch (_: Exception) {}
             checkLimitExceededFromDb(dao, date)

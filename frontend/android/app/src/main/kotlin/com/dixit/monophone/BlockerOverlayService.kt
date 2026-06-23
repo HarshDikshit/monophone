@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.util.Log
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
@@ -39,6 +40,9 @@ class BlockerOverlayService : Service() {
         private const val NOTIFICATION_ID = 20
         private const val EMERGENCY_DURATION_MS = 5 * 60 * 1000L
         private const val TAG = "BlockerOverlay"
+        
+        /** Set to true while the overlay is visible to prevent the service from re-triggering. */
+        @Volatile var isCurrentlyShowing = false
     }
 
     private lateinit var windowManager: WindowManager
@@ -50,6 +54,23 @@ class BlockerOverlayService : Service() {
 
     private val handler = Handler(Looper.getMainLooper())
     private var isShowing = false
+
+    private val monitorRunnable = object : Runnable {
+        override fun run() {
+            if (!isShowing) return
+            
+            // Only auto-dismiss if this was a daily limit block and the limit is now under control.
+            // DO NOT dismiss if it's a Reels/Shorts block (those are handled by the user pressing a button).
+            val isLimitBlock = blockReason.contains("limit", ignoreCase = true)
+            if (isLimitBlock && blockedPackage.isNotEmpty() && !UsageTracker.isLimitExceeded(blockedPackage)) {
+                Log.d(TAG, "Limit check passed — dismissing overlay.")
+                stopSelf()
+                return
+            }
+            
+            handler.postDelayed(this, 1500L) // Check every 1.5s
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -90,6 +111,8 @@ class BlockerOverlayService : Service() {
         handler.postDelayed({
             if (!isShowing) {
                 showOverlay()
+                // Start monitoring for limit updates
+                handler.post(monitorRunnable)
             }
         }, 200)
 
@@ -98,7 +121,9 @@ class BlockerOverlayService : Service() {
 
     override fun onDestroy() {
         isShowing = false
+        isCurrentlyShowing = false
         handler.removeCallbacksAndMessages(null)
+        handler.removeCallbacks(monitorRunnable)
         hideOverlay()
         super.onDestroy()
     }
@@ -110,6 +135,7 @@ class BlockerOverlayService : Service() {
     private fun showOverlay() {
         if (isShowing) return
         isShowing = true
+        isCurrentlyShowing = true
 
         val ctx = this
         val dp = resources.displayMetrics.density
@@ -348,6 +374,19 @@ class BlockerOverlayService : Service() {
     }
 
     private fun onReturnToFocus() {
+        // For Reels/Shorts blocks, just perform a BACK gesture — exits the feed
+        // and stays inside the app (Home feed / Search tab).
+        val isReelsShortsBlock = blockReason.contains("Reels", ignoreCase = true) || 
+                                 blockReason.contains("Shorts", ignoreCase = true) ||
+                                 blockReason.contains("vertical", ignoreCase = true)
+        val service = FocusAccessibilityService.instance
+        if (isReelsShortsBlock && service != null && blockedPackage.isNotEmpty()) {
+            service.performBackAction(blockedPackage)
+            stopSelf()
+            return
+        }
+
+        // Fallback for standard app blocks: Return to Launcher
         val homeIntent = Intent(this, MainActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         }

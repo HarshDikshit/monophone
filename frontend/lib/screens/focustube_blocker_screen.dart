@@ -21,7 +21,10 @@ class _FocusTubeBlockerScreenState extends State<FocusTubeBlockerScreen> {
 
   // Local Blocker configuration states (synced with BlockerService)
   bool _isStrictMode = false;
-  bool _blockReelsShorts = false;
+  bool _blockYoutubeShorts = false;
+  bool _blockInstagramReels = false;
+  bool _allowOneYoutubeShort = false;
+  bool _allowOneInstagramReel = false;
   String _unlockOption = 'text';
   DateTime? _lockUntilDate;
   bool _vpnContentFilter = false;
@@ -58,7 +61,10 @@ class _FocusTubeBlockerScreenState extends State<FocusTubeBlockerScreen> {
     final blocker = BlockerService.instance;
     setState(() {
       _isStrictMode = blocker.isStrictMode;
-      _blockReelsShorts = blocker.blockReelsShorts;
+      _blockYoutubeShorts = blocker.blockYoutubeShorts;
+      _blockInstagramReels = blocker.blockInstagramReels;
+      _allowOneYoutubeShort = blocker.allowOneYoutubeShort;
+      _allowOneInstagramReel = blocker.allowOneInstagramReel;
       _unlockOption = blocker.unlockOption;
       _lockUntilDate = blocker.lockUntilDate;
       _vpnContentFilter = blocker.vpnContentFilterEnabled;
@@ -77,7 +83,10 @@ class _FocusTubeBlockerScreenState extends State<FocusTubeBlockerScreen> {
     final state = context.read<LauncherState>();
     await state.updateBlockerSettings(
       isStrictMode: _isStrictMode,
-      blockReelsShorts: _blockReelsShorts,
+      blockYoutubeShorts: _blockYoutubeShorts,
+      blockInstagramReels: _blockInstagramReels,
+      allowOneYoutubeShort: _allowOneYoutubeShort,
+      allowOneInstagramReel: _allowOneInstagramReel,
       unlockOption: _unlockOption,
       lockUntilDate: _lockUntilDate,
       vpnContentFilterEnabled: _vpnContentFilter,
@@ -793,23 +802,47 @@ class _FocusTubeBlockerScreenState extends State<FocusTubeBlockerScreen> {
             const SizedBox(height: 16),
 
             // Shorts tiles
-            _buildToggleBlockTile(
+            _buildExpansionReelsTile(
               "YouTube Shorts",
-              "youtube_shorts",
-              _blockReelsShorts,
+              _blockYoutubeShorts,
+              _allowOneYoutubeShort,
+              (val) async {
+                if (_isLocked) return;
+                if (val) {
+                  final enabled = await context.read<LauncherState>().isAccessibilityServiceEnabled();
+                  if (!enabled) {
+                    _showAccessibilityPermissionDialog();
+                    return;
+                  }
+                }
+                setState(() => _blockYoutubeShorts = val);
+                _saveSettings();
+              },
               (val) {
                 if (_isLocked) return;
-                setState(() => _blockReelsShorts = val);
+                setState(() => _allowOneYoutubeShort = val);
                 _saveSettings();
               },
             ),
-            _buildToggleBlockTile(
-              "IG Reels",
-              "instagram_reels",
-              _blockReelsShorts,
+            _buildExpansionReelsTile(
+              "Instagram Reels",
+              _blockInstagramReels,
+              _allowOneInstagramReel,
+              (val) async {
+                if (_isLocked) return;
+                if (val) {
+                  final enabled = await context.read<LauncherState>().isAccessibilityServiceEnabled();
+                  if (!enabled) {
+                    _showAccessibilityPermissionDialog();
+                    return;
+                  }
+                }
+                setState(() => _blockInstagramReels = val);
+                _saveSettings();
+              },
               (val) {
                 if (_isLocked) return;
-                setState(() => _blockReelsShorts = val);
+                setState(() => _allowOneInstagramReel = val);
                 _saveSettings();
               },
             ),
@@ -1256,6 +1289,155 @@ class _FocusTubeBlockerScreenState extends State<FocusTubeBlockerScreen> {
             inactiveThumbColor: Colors.grey[800],
             inactiveTrackColor: Colors.white10,
             onChanged: _isLocked ? null : onChanged,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildExpansionReelsTile(
+    String label,
+    bool isEnabled,
+    bool allowOne,
+    ValueChanged<bool> onToggle,
+    ValueChanged<bool> onAllowOneChanged,
+  ) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0F0F0F),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white12, width: 0.5),
+      ),
+      child: ExpansionTile(
+        tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        childrenPadding: const EdgeInsets.only(left: 60, right: 16, bottom: 16),
+        collapsedIconColor: Colors.white30,
+        iconColor: Colors.white,
+        title: Text(
+          label,
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+            fontSize: 15,
+          ),
+        ),
+        leading: Container(
+          width: 32,
+          height: 32,
+          decoration: const BoxDecoration(
+            shape: BoxShape.circle,
+            color: Colors.white10,
+          ),
+          child: const Center(
+            child: Icon(
+              Icons.video_library_outlined,
+              color: Colors.white70,
+              size: 18,
+            ),
+          ),
+        ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Switch(
+              value: isEnabled,
+              activeColor: Colors.white,
+              activeTrackColor: Colors.white60,
+              inactiveThumbColor: Colors.grey[800],
+              inactiveTrackColor: Colors.white10,
+              onChanged: _isLocked ? null : onToggle,
+            ),
+            const Icon(Icons.expand_more, color: Colors.white30),
+          ],
+        ),
+        children: [
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Divider(color: Colors.white10, height: 1),
+              const SizedBox(height: 16),
+              const Text(
+                "BLOCKING MODE",
+                style: TextStyle(
+                  color: Colors.white38,
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1,
+                  fontFamily: 'monospace',
+                ),
+              ),
+              const SizedBox(height: 8),
+              _buildModeOption(
+                "Block completely",
+                "Blocks instantly on detection",
+                !allowOne,
+                () => onAllowOneChanged(false),
+              ),
+              const SizedBox(height: 12),
+              _buildModeOption(
+                "Allow 1 (Block on Scroll)",
+                "View first, block when scrolling",
+                allowOne,
+                () => onAllowOneChanged(true),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildModeOption(
+    String title,
+    String subtitle,
+    bool isSelected,
+    VoidCallback onTap,
+  ) {
+    return GestureDetector(
+      onTap: _isLocked ? null : onTap,
+      child: Row(
+        children: [
+          Container(
+            width: 18,
+            height: 18,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: isSelected ? Colors.white : Colors.white24,
+                width: 2,
+              ),
+            ),
+            padding: const EdgeInsets.all(3),
+            child: isSelected
+                ? Container(
+                    decoration: const BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.white,
+                    ),
+                  )
+                : null,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    color: isSelected ? Colors.white : Colors.white60,
+                    fontWeight:
+                        isSelected ? FontWeight.bold : FontWeight.normal,
+                    fontSize: 13,
+                  ),
+                ),
+                Text(
+                  subtitle,
+                  style: const TextStyle(color: Colors.white24, fontSize: 11),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -2194,6 +2376,52 @@ class _FocusTubeBlockerScreenState extends State<FocusTubeBlockerScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  void _showAccessibilityPermissionDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.black,
+        shape: Border.all(color: Colors.white24),
+        title: const Text(
+          "ACCESSIBILITY REQUIRED",
+          style: TextStyle(
+            color: Colors.white,
+            fontFamily: 'monospace',
+            fontSize: 15,
+          ),
+        ),
+        content: const Text(
+          "To block Reels and Shorts, the Accessibility Service must be enabled. This allows the app to detect when you are in a scrolling video feed.",
+          style: TextStyle(
+            color: Colors.white70,
+            fontSize: 13,
+            height: 1.5,
+            fontFamily: 'monospace',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text(
+              "NOT NOW",
+              style: TextStyle(color: Colors.white30, fontFamily: 'monospace'),
+            ),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              context.read<LauncherState>().openAccessibilitySettings();
+            },
+            child: const Text(
+              "TURN ON",
+              style: TextStyle(color: Colors.green, fontFamily: 'monospace'),
+            ),
+          ),
+        ],
       ),
     );
   }
