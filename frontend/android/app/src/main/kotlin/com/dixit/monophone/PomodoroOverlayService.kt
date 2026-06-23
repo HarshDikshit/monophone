@@ -597,40 +597,52 @@ class PomodoroOverlayService : Service() {
             immutableFlag
         )
 
-        // Build custom notification layout using RemoteViews
+        // Build custom notification layouts using RemoteViews
         val remoteViews = RemoteViews(packageName, R.layout.custom_pomodoro_notification)
+        val bigRemoteViews = RemoteViews(packageName, R.layout.custom_pomodoro_notification_expanded)
 
         // --- Update text fields: secondsRemaining is always the display value ---
         val minutes = secondsRemaining / 60
         val seconds = secondsRemaining % 60
         val timeStr = String.format("%02d:%02d", minutes, seconds)
 
-        // Task title
-        remoteViews.setTextViewText(R.id.task_title,
-            if (isBreak) "BREAK TIME" else taskName.uppercase())
+        // Task title and status
+        val statusText = if (isBreak) "BREAK TIME" else "KEEP FOCUSING"
+        val displayTaskName = if (isBreak) "Break Time" else taskName
+
+        remoteViews.setTextViewText(R.id.task_title, displayTaskName.uppercase())
+        bigRemoteViews.setTextViewText(R.id.task_title, displayTaskName.uppercase())
+        
+        // We added status_text to expanded layout
+        try {
+            bigRemoteViews.setTextViewText(resources.getIdentifier("status_text", "id", packageName), statusText)
+        } catch (_: Exception) {}
 
         // Timer text
         remoteViews.setTextViewText(R.id.timer_text, timeStr)
+        bigRemoteViews.setTextViewText(R.id.timer_text, timeStr)
 
         // Timer color based on state
-        if (isBreak) {
-            remoteViews.setTextColor(R.id.timer_text, Color.parseColor("#4CAF50"))
-        } else if (isPaused) {
-            remoteViews.setTextColor(R.id.timer_text, Color.parseColor("#FF9800"))
-        } else {
-            remoteViews.setTextColor(R.id.timer_text, Color.parseColor("#FF5722"))
+        val timerColor = when {
+            isBreak -> Color.parseColor("#4CAF50")
+            isPaused -> Color.parseColor("#FF9800")
+            else -> Color.parseColor("#FF5722")
         }
+        remoteViews.setTextColor(R.id.timer_text, timerColor)
+        bigRemoteViews.setTextColor(R.id.timer_text, timerColor)
 
-        // --- Update icon based on play/pause state ---
-        remoteViews.setImageViewResource(R.id.btn_play_pause,
-            if (isPaused) android.R.drawable.ic_media_play else android.R.drawable.ic_media_pause)
+        // --- Update icons based on play/pause state ---
+        val playPauseIcon = if (isPaused) android.R.drawable.ic_media_play else android.R.drawable.ic_media_pause
+        remoteViews.setImageViewResource(R.id.btn_play_pause, playPauseIcon)
+        bigRemoteViews.setImageViewResource(R.id.btn_play_pause, playPauseIcon)
 
         // --- Set click intents ---
         remoteViews.setOnClickPendingIntent(R.id.btn_play_pause, playPausePendingIntent)
         remoteViews.setOnClickPendingIntent(R.id.btn_stop, stopPendingIntent)
+        bigRemoteViews.setOnClickPendingIntent(R.id.btn_play_pause, playPausePendingIntent)
+        bigRemoteViews.setOnClickPendingIntent(R.id.btn_stop, stopPendingIntent)
 
         // Use the app logo as the small icon in the notification bar
-        // The large logo is already shown in the custom layout via @drawable/notification_logo
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.notification_logo)
             .setContentIntent(contentIntent)
@@ -638,6 +650,7 @@ class PomodoroOverlayService : Service() {
             .setOngoing(true)
             .setSilent(true)
             .setCustomContentView(remoteViews)
+            .setCustomBigContentView(bigRemoteViews)
             .setStyle(NotificationCompat.DecoratedCustomViewStyle())
 
         return builder.build()

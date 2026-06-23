@@ -69,7 +69,7 @@ class LauncherState extends ChangeNotifier {
   List<int> _hourlyStudySeconds = List.filled(24, 0);
   Map<String, int> _taskStudySeconds = {};
   List<Map<String, dynamic>> _pomoSessions = [];
-  
+
   // Track current session details
   DateTime? _currentSessionStart;
   int? _currentSessionDefinedSeconds;
@@ -92,12 +92,11 @@ class LauncherState extends ChangeNotifier {
   int get studySeconds => _studySeconds + _pomodoroPendingFocusSeconds;
 
   // NO MORE LOCAL _tasks. We use _plannerService exclusively.
-  
+
   String? _activeTaskId;
   String? get activeTaskId => _activeTaskId;
 
   DateTime _lastTaskActivityTime = DateTime.now();
-
 
   Map<String, dynamic>? _userProfile;
   Map<String, dynamic>? get userProfile => _userProfile;
@@ -125,7 +124,7 @@ class LauncherState extends ChangeNotifier {
     await refreshAppsList();
     await _loadLocalStats();
     _initMethodChannel();
-    
+
     // Once-a-day backend sync
     final prefs = await SharedPreferences.getInstance();
     final today = _todayKey();
@@ -171,7 +170,7 @@ class LauncherState extends ChangeNotifier {
             _pomodoroPendingFocusSeconds += 1;
             _pomodoroPendingTaskSeconds += 1;
             _pomodoroDirty = true;
-            
+
             // Increment hourly bucket
             final hour = DateTime.now().hour;
             _hourlyStudySeconds[hour] += 1;
@@ -185,11 +184,12 @@ class LauncherState extends ChangeNotifier {
           final String task = call.arguments['taskName'] ?? "";
 
           if (status == "STOPPED") {
-            final double sessionDuration = _pomodoroTotalDurationSeconds.toDouble();
+            final double sessionDuration = _pomodoroTotalDurationSeconds
+                .toDouble();
             final bool wasBreak = _isBreak;
-            
+
             await _commitPomodoroProgress(sync: true);
-            
+
             if (!wasBreak) {
               _incrementActiveTaskPomodoro();
               // Logic Check: Pomodoro finished
@@ -216,7 +216,7 @@ class LauncherState extends ChangeNotifier {
             _isPomodoroActive = false;
             _pomodoroTotalDurationSeconds = _customDurationSeconds;
             _pomodoroSessionDateKey = '';
-            
+
             // Play alert sound if enabled
             if (_soundEnabled) {
               _playAlertSound();
@@ -243,7 +243,7 @@ class LauncherState extends ChangeNotifier {
               _pomodoroTotalDurationSeconds = _pomodoroTotalDurationSeconds > 0
                   ? _pomodoroTotalDurationSeconds
                   : _customDurationSeconds;
-              
+
               if (_currentSessionStart == null) {
                 _currentSessionStart = DateTime.now();
                 _currentSessionDefinedSeconds = _pomodoroTotalDurationSeconds;
@@ -304,10 +304,10 @@ class LauncherState extends ChangeNotifier {
     // If loaded day is different from today, RESET local counts
     final todayStr = _todayKey();
     final storedDay = prefs.getString('last_commited_day') ?? todayStr;
-    
+
     _studySeconds = prefs.getInt('study_seconds_$todayStr') ?? 0;
     _distractedSeconds = prefs.getInt('distracted_seconds_$todayStr') ?? 0;
-    
+
     // Load detailed stats
     final hourlyJson = prefs.getString('hourly_seconds_$todayStr');
     if (hourlyJson != null) {
@@ -334,7 +334,9 @@ class LauncherState extends ChangeNotifier {
     final sessionJson = prefs.getString('pomo_sessions_$todayStr');
     if (sessionJson != null) {
       try {
-        _pomoSessions = List<Map<String, dynamic>>.from(jsonDecode(sessionJson));
+        _pomoSessions = List<Map<String, dynamic>>.from(
+          jsonDecode(sessionJson),
+        );
       } catch (_) {
         _pomoSessions = [];
       }
@@ -468,13 +470,14 @@ class LauncherState extends ChangeNotifier {
     // Now _studySeconds definitely belongs to today. Add pending (today's time).
     _studySeconds += _pomodoroPendingFocusSeconds;
     final taskSeconds = _pomodoroPendingTaskSeconds;
-    
+
     if (_currentSessionStart != null && taskSeconds > 0) {
       final now = DateTime.now();
       _pomoSessions.add({
         'startTime': _currentSessionStart!.toIso8601String(),
         'endTime': now.toIso8601String(),
-        'definedSeconds': _currentSessionDefinedSeconds ?? _pomodoroTotalDurationSeconds,
+        'definedSeconds':
+            _currentSessionDefinedSeconds ?? _pomodoroTotalDurationSeconds,
         'actualSeconds': taskSeconds,
         'taskId': _activeTaskId,
         'title': _lastGoal,
@@ -504,8 +507,14 @@ class LauncherState extends ChangeNotifier {
     final todayStr = _todayKey();
     await prefs.setInt('study_seconds_$todayStr', _studySeconds);
     await prefs.setInt('distracted_seconds_$todayStr', _distractedSeconds);
-    await prefs.setString('hourly_seconds_$todayStr', jsonEncode(_hourlyStudySeconds));
-    await prefs.setString('task_seconds_$todayStr', jsonEncode(_taskStudySeconds));
+    await prefs.setString(
+      'hourly_seconds_$todayStr',
+      jsonEncode(_hourlyStudySeconds),
+    );
+    await prefs.setString(
+      'task_seconds_$todayStr',
+      jsonEncode(_taskStudySeconds),
+    );
     await prefs.setString('pomo_sessions_$todayStr', jsonEncode(_pomoSessions));
     await prefs.setString('last_goal', _lastGoal);
     await loadWeeklyData();
@@ -626,18 +635,27 @@ class LauncherState extends ChangeNotifier {
         if (_studyApps.contains(_lastLaunchedPackage)) {
           _studySeconds += elapsed;
           _attributeSecondsToTask(_activeTaskId, elapsed);
-          
+
           // Bucketing for handleResume
           final hour = DateTime.now().hour;
           _hourlyStudySeconds[hour] += elapsed;
-          
+
           _pomoSessions.add({
             'startTime': _exitTime!.toIso8601String(),
             'endTime': DateTime.now().toIso8601String(),
             'definedSeconds': elapsed,
             'actualSeconds': elapsed,
             'taskId': _activeTaskId,
-            'title': _activeTaskId != null ? (_plannerService?.getTaskById(_activeTaskId!)?.title ?? 'Task') : (_studyApps.contains(_lastLaunchedPackage) ? (_allApps.firstWhere((a)=>a['packageName']==_lastLaunchedPackage, orElse: ()=>const {})['name'] ?? 'App') : "Focus"),
+            'title': _activeTaskId != null
+                ? (_plannerService?.getTaskById(_activeTaskId!)?.title ??
+                      'Task')
+                : (_studyApps.contains(_lastLaunchedPackage)
+                      ? (_allApps.firstWhere(
+                              (a) => a['packageName'] == _lastLaunchedPackage,
+                              orElse: () => const {},
+                            )['name'] ??
+                            'App')
+                      : "Focus"),
             'isBreak': false,
           });
         } else if (_distractionApps.contains(_lastLaunchedPackage)) {
@@ -724,7 +742,7 @@ class LauncherState extends ChangeNotifier {
         );
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('last_sync_date', today);
-        
+
         await fetchUserProfile();
         await updateAIHeadline();
       } catch (e) {
@@ -852,35 +870,6 @@ class LauncherState extends ChangeNotifier {
     _pomodoroDirty = false;
     _pomodoroSessionDateKey = _todayKey();
 
-    final focusTubeBlockedNames = BlockerService.instance.unproductiveAppNames
-        .map((name) => name.toLowerCase().trim())
-        .toSet();
-    final focusTubePackages = _allApps
-        .where(
-          (app) => focusTubeBlockedNames.contains(
-            (app['name'] ?? '').toLowerCase().trim(),
-          ),
-        )
-        .map((app) => app['packageName'] ?? '')
-        .where((pkg) => pkg.isNotEmpty)
-        .toSet();
-
-    final blockReels = BlockerService.instance.blockReelsShorts;
-    final reelsPackages = _allApps
-        .where((app) {
-          if (!blockReels) return false;
-          final name = (app['name'] ?? '').toLowerCase().trim();
-          return name.contains('instagram') ||
-              name.contains('youtube') ||
-              name.contains('tiktok') ||
-              name.contains('facebook') ||
-              name.contains('reels') ||
-              name.contains('shorts');
-        })
-        .map((app) => app['packageName'] ?? '')
-        .where((pkg) => pkg.isNotEmpty)
-        .toSet();
-
     // NOTE: No startMonitoring() call — we intentionally removed the native
     // app-blocking hard lock. Pomodoro is a soft focus timer only; it does
     // NOT forcefully block apps on the native side.
@@ -906,7 +895,7 @@ class LauncherState extends ChangeNotifier {
     _isBreak = true;
     _pomodoroSecondsRemaining = 5 * 60; // Standard 5 min break
     _pomodoroTotalDurationSeconds = 5 * 60;
-    
+
     await _channel.invokeMethod('startPomodoro', {
       'taskName': "Break Time",
       'durationSeconds': 5 * 60,
@@ -915,7 +904,7 @@ class LauncherState extends ChangeNotifier {
       'soundEnabled': _soundEnabled,
       'vibrationEnabled': _vibrationEnabled,
     });
-    
+
     notifyListeners();
   }
 
@@ -939,7 +928,8 @@ class LauncherState extends ChangeNotifier {
       _autoStartBreak = false;
       await _saveTimerPreferences();
     }
-    await _channel.invokeMethod('stopMonitoring');
+    // Note: No stopMonitoring() call needed here because startPomodoro()
+    // no longer starts native monitoring (hard lock was removed).
     await _channel.invokeMethod('stopPomodoro');
 
     await ApiService.updateStatus('Idle', false);
@@ -1237,7 +1227,7 @@ class LauncherState extends ChangeNotifier {
     _userProfile = await OfflineSyncService.instance.getCachedProfile();
     final goal = await OfflineSyncService.instance.getCachedGoal();
     if (goal.isNotEmpty) _lastGoal = goal;
-    
+
     final prefs = await SharedPreferences.getInstance();
     final studyResult = <String, int>{};
     final distractedResult = <String, int>{};
@@ -1316,21 +1306,27 @@ class LauncherState extends ChangeNotifier {
   List<Map<String, dynamic>> get tasks {
     if (_plannerService == null) return [];
     // Map TimeBlockTask to the old Map format for compatibility with existing UI
-    return _plannerService!.tasks.map((t) => {
-      'id': t.id,
-      'title': t.title,
-      'isDone': t.isCompleted,
-      'focusSeconds': t.focusSeconds,
-      'completedPomodoroCount': t.completedPomodoros,
-      'estimatedPomodoros': t.estimatedPomodoros,
-      'isRecurring': t.isRecurring,
-    }).toList();
+    return _plannerService!.tasks
+        .map(
+          (t) => {
+            'id': t.id,
+            'title': t.title,
+            'isDone': t.isCompleted,
+            'focusSeconds': t.focusSeconds,
+            'completedPomodoroCount': t.completedPomodoros,
+            'estimatedPomodoros': t.estimatedPomodoros,
+            'isRecurring': t.isRecurring,
+          },
+        )
+        .toList();
   }
 
   Map<String, dynamic>? get activeTask {
     if (_activeTaskId == null || _plannerService == null) return null;
     try {
-      final t = _plannerService!.tasks.firstWhere((element) => element.id == _activeTaskId);
+      final t = _plannerService!.tasks.firstWhere(
+        (element) => element.id == _activeTaskId,
+      );
       return {
         'id': t.id,
         'title': t.title,
@@ -1348,7 +1344,7 @@ class LauncherState extends ChangeNotifier {
   void _attributeSecondsToTask(String? taskId, int seconds) {
     if (taskId == null || seconds <= 0 || _plannerService == null) return;
     _plannerService!.addFocusSeconds(taskId, seconds);
-    
+
     // Also track for today's specific analytics record
     _taskStudySeconds[taskId] = (_taskStudySeconds[taskId] ?? 0) + seconds;
   }
@@ -1370,7 +1366,7 @@ class LauncherState extends ChangeNotifier {
       startTime: DateTime.now(),
       estimatedPomodoros: estimatedPomodoros,
       isRecurring: isRecurring,
-      recurringDays: isRecurring ? [1,2,3,4,5,6,7] : [],
+      recurringDays: isRecurring ? [1, 2, 3, 4, 5, 6, 7] : [],
     );
     await _plannerService!.addTask(task);
   }
@@ -1379,7 +1375,9 @@ class LauncherState extends ChangeNotifier {
     if (_plannerService == null) return;
     final idx = _plannerService!.tasks.indexWhere((t) => t.id == taskId);
     if (idx != -1) {
-      final updated = _plannerService!.tasks[idx].copyWith(estimatedPomodoros: count.clamp(1, 99));
+      final updated = _plannerService!.tasks[idx].copyWith(
+        estimatedPomodoros: count.clamp(1, 99),
+      );
       await _plannerService!.updateTask(updated);
     }
   }
@@ -1403,7 +1401,7 @@ class LauncherState extends ChangeNotifier {
       final t = _plannerService!.tasks[idx];
       final updated = t.copyWith(
         isRecurring: !t.isRecurring,
-        recurringDays: !t.isRecurring ? [1,2,3,4,5,6,7] : [],
+        recurringDays: !t.isRecurring ? [1, 2, 3, 4, 5, 6, 7] : [],
       );
       await _plannerService!.updateTask(updated);
     }
@@ -1446,7 +1444,9 @@ class LauncherState extends ChangeNotifier {
       newTaskName = taskName;
     } else if (newTaskId != null && _plannerService != null) {
       try {
-        newTaskName = _plannerService!.tasks.firstWhere((t) => t.id == newTaskId).title;
+        newTaskName = _plannerService!.tasks
+            .firstWhere((t) => t.id == newTaskId)
+            .title;
       } catch (_) {}
     }
     _lastGoal = newTaskName;
@@ -1602,7 +1602,6 @@ class LauncherState extends ChangeNotifier {
     await toggleSystemGrayscale(monochromeModeEnabled);
     notifyListeners();
   }
-
 
   /// Public method for manual sync (pull-to-refresh)
   Future<void> syncStats() async {
