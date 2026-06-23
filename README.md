@@ -17,7 +17,7 @@ Since this app is completely open-source and currently in its early stages, your
 
 To get Monophone running on your device right now, download our optimized production binaries directly from our official release pipeline below:
 
-* 🌟 **[Download Monophone (Optimized 64-bit APK)](https://github.com/HarshDikshit/monophone/releases/download/v1.0.1/app-arm64-v8a-release.apk)** — **Recommended** for almost all modern Android devices (including Samsung Galaxy, Pixel, and OnePlus handsets) for the best performance and battery efficiency.
+* 🌟 **[Download Monophone (Optimized 64-bit APK)](https://github.com/HarshDikshit/monophone/releases/download/2.2.14%2B9/app-arm64-v8a-release.apk)** — **Recommended** for almost all modern Android devices (including Samsung Galaxy, Pixel, and OnePlus handsets) for the best performance and battery efficiency.
 * 📦 **[Download Monophone (Universal Fallback APK)](https://github.com/HarshDikshit/monophone/releases/download/v1.0.1/app-release.apk)** — Contains all CPU architectures in a single, slightly larger file size.
 
 ### 📲 How to Install:
