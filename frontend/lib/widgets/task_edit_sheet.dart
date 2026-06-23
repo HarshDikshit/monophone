@@ -57,115 +57,161 @@ class _TaskEditSheetState extends State<TaskEditSheet> {
   Widget build(BuildContext context) {
     final totalDurationMins = estPomodoros * pomoDurationMins;
     final endTime = selectedTime.add(Duration(minutes: totalDurationMins));
-    final endStr = '${endTime.hour.toString().padLeft(2, '0')}:${endTime.minute.toString().padLeft(2, '0')}';
+    final endStr =
+        '${endTime.hour.toString().padLeft(2, '0')}:${endTime.minute.toString().padLeft(2, '0')}';
 
-    return Padding(
-      padding: EdgeInsets.only(
-        left: 24,
-        right: 24,
-        top: 16,
-        bottom: MediaQuery.of(context).viewInsets.bottom + 24,
-      ),
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Center(child: Container(width: 36, height: 3, color: Colors.white24)),
-            const SizedBox(height: 16),
-            Text(
-              widget.existing != null ? 'EDIT TASK' : 'NEW TASK',
-              style: const TextStyle(
-                color: Colors.white,
-                fontFamily: 'monospace',
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 2,
+    return Container(
+      color: Colors.black,
+      child: Padding(
+        padding: EdgeInsets.only(
+          left: 24,
+          right: 24,
+          top: 16,
+          bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(width: 36, height: 3, color: Colors.white24),
               ),
-            ),
-            const SizedBox(height: 24),
-            TextField(
-              controller: titleCtrl,
-              maxLines: 1,
-              style: const TextStyle(color: Colors.white, fontFamily: 'monospace', fontSize: 14),
-              cursorColor: Colors.white,
-              decoration: const InputDecoration(
-                hintText: 'TASK TITLE',
-                hintStyle: TextStyle(color: Colors.white12),
-                enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white10)),
-                focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white)),
+              const SizedBox(height: 16),
+              Text(
+                widget.existing != null ? 'EDIT TASK' : 'NEW TASK',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontFamily: 'monospace',
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 2,
+                ),
               ),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: descCtrl,
-              maxLines: null,
-              style: const TextStyle(color: Colors.white60, fontFamily: 'monospace', fontSize: 12),
-              decoration: const InputDecoration(
-                hintText: 'DESCRIPTION (optional)',
-                hintStyle: TextStyle(color: Colors.white12),
-                enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white10)),
-                focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white)),
-              ),
-            ),
-            const SizedBox(height: 20),
-            const Text('TAG', style: TextStyle(color: Colors.white38, fontFamily: 'monospace', fontSize: 10)),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: TaskTag.values.map((tag) {
-                final isSel = selectedTag == tag;
-                return GestureDetector(
-                  onTap: () => setState(() => selectedTag = tag),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
-                    decoration: BoxDecoration(
-                      color: isSel ? tag.color.withOpacity(0.15) : Colors.transparent,
-                      border: Border.all(color: isSel ? tag.color : Colors.white12),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(tag.icon, size: 14, color: tag.color),
-                        const SizedBox(width: 6),
-                        Text(
-                          tag.displayName,
-                          style: TextStyle(
-                            color: isSel ? tag.color : Colors.white38,
-                            fontFamily: 'monospace',
-                            fontSize: 11,
-                            fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
-                          ),
-                        ),
-                      ],
-                    ),
+              const SizedBox(height: 24),
+              TextField(
+                controller: titleCtrl,
+                maxLines: 1,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontFamily: 'monospace',
+                  fontSize: 14,
+                ),
+                cursorColor: Colors.white,
+                decoration: const InputDecoration(
+                  hintText: 'TASK TITLE',
+                  hintStyle: TextStyle(color: Colors.white12),
+                  enabledBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: Colors.white10),
                   ),
+                  focusedBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: Colors.white),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: descCtrl,
+                maxLines: null,
+                style: const TextStyle(
+                  color: Colors.white60,
+                  fontFamily: 'monospace',
+                  fontSize: 12,
+                ),
+                decoration: const InputDecoration(
+                  hintText: 'DESCRIPTION (optional)',
+                  hintStyle: TextStyle(color: Colors.white12),
+                  enabledBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: Colors.white10),
+                  ),
+                  focusedBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: Colors.white),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              const Text(
+                'TAG',
+                style: TextStyle(
+                  color: Colors.white38,
+                  fontFamily: 'monospace',
+                  fontSize: 10,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: TaskTag.values.map((tag) {
+                  final isSel = selectedTag == tag;
+                  return GestureDetector(
+                    onTap: () => setState(() => selectedTag = tag),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 6,
+                        horizontal: 12,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isSel
+                            ? tag.color.withOpacity(0.15)
+                            : Colors.transparent,
+                        border: Border.all(
+                          color: isSel ? tag.color : Colors.white12,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(tag.icon, size: 14, color: tag.color),
+                          const SizedBox(width: 6),
+                          Text(
+                            tag.displayName,
+                            style: TextStyle(
+                              color: isSel ? tag.color : Colors.white38,
+                              fontFamily: 'monospace',
+                              fontSize: 11,
+                              fontWeight: isSel
+                                  ? FontWeight.bold
+                                  : FontWeight.normal,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 20),
+              _buildTimeSection(),
+              const SizedBox(height: 12),
+              _infoField('POMODORO DURATION', '$pomoDurationMins min', () {
+                _showNumberPicker(
+                  'Pomodoro duration',
+                  pomoDurationMins,
+                  5,
+                  120,
+                  (v) {
+                    setState(() => pomoDurationMins = v);
+                  },
                 );
-              }).toList(),
-            ),
-            const SizedBox(height: 20),
-            _buildTimeSection(),
-            const SizedBox(height: 12),
-             _infoField('POMODORO DURATION', '$pomoDurationMins min', () {
-              _showNumberPicker('Pomodoro duration', pomoDurationMins, 5, 120, (v) {
-                setState(() => pomoDurationMins = v);
-              });
-            }),
-            const SizedBox(height: 12),
-            _infoField('ESTIMATED POMODOROS', '$estPomodoros 🍅', () {
-               _showNumberPicker('Estimated Pomodoros', estPomodoros, 1, 99, (v) {
-                setState(() => estPomodoros = v);
-              });
-            }),
-            const SizedBox(height: 12),
-            _buildDurationSummary(totalDurationMins, endStr),
-            const SizedBox(height: 12),
-            _buildAlarmToggle(),
-            const SizedBox(height: 20),
-            _buildRecurringToggle(),
-            const SizedBox(height: 24),
-            _buildActionButtons(totalDurationMins),
-          ],
+              }),
+              const SizedBox(height: 12),
+              _infoField('ESTIMATED POMODOROS', '$estPomodoros 🍅', () {
+                _showNumberPicker('Estimated Pomodoros', estPomodoros, 1, 99, (
+                  v,
+                ) {
+                  setState(() => estPomodoros = v);
+                });
+              }),
+              const SizedBox(height: 12),
+              _buildDurationSummary(totalDurationMins, endStr),
+              const SizedBox(height: 12),
+              _buildAlarmToggle(),
+              const SizedBox(height: 20),
+              _buildRecurringToggle(),
+              const SizedBox(height: 24),
+              _buildActionButtons(totalDurationMins),
+            ],
+          ),
         ),
       ),
     );
@@ -178,7 +224,14 @@ class _TaskEditSheetState extends State<TaskEditSheet> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('START TIME', style: TextStyle(color: Colors.white38, fontFamily: 'monospace', fontSize: 9)),
+          const Text(
+            'START TIME',
+            style: TextStyle(
+              color: Colors.white38,
+              fontFamily: 'monospace',
+              fontSize: 9,
+            ),
+          ),
           const SizedBox(height: 8),
           Center(
             child: GestureDetector(
@@ -189,13 +242,24 @@ class _TaskEditSheetState extends State<TaskEditSheet> {
                 );
                 if (t != null) {
                   setState(() {
-                    selectedTime = DateTime(selectedTime.year, selectedTime.month, selectedTime.day, t.hour, t.minute);
+                    selectedTime = DateTime(
+                      selectedTime.year,
+                      selectedTime.month,
+                      selectedTime.day,
+                      t.hour,
+                      t.minute,
+                    );
                   });
                 }
               },
               child: Text(
                 '${selectedTime.hour.toString().padLeft(2, '0')}:${selectedTime.minute.toString().padLeft(2, '0')}',
-                style: const TextStyle(color: Colors.white, fontFamily: 'monospace', fontSize: 24, fontWeight: FontWeight.bold),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontFamily: 'monospace',
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
           ),
@@ -208,21 +272,34 @@ class _TaskEditSheetState extends State<TaskEditSheet> {
 
   Widget _buildTimeButtons() {
     Widget btn(String label, int delta) => GestureDetector(
-      onTap: () => setState(() => selectedTime = selectedTime.add(Duration(minutes: delta))),
+      onTap: () => setState(
+        () => selectedTime = selectedTime.add(Duration(minutes: delta)),
+      ),
       child: Container(
-        width: 32, height: 32,
+        width: 32,
+        height: 32,
         decoration: BoxDecoration(border: Border.all(color: Colors.white10)),
-        child: Center(child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 8))),
+        child: Center(
+          child: Text(
+            label,
+            style: const TextStyle(color: Colors.white, fontSize: 8),
+          ),
+        ),
       ),
     );
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        btn('-10', -10), const SizedBox(width: 4),
-        btn('-5', -5), const SizedBox(width: 4),
-        btn('-1', -1), const SizedBox(width: 12),
-        btn('+1', 1), const SizedBox(width: 4),
-        btn('+5', 5), const SizedBox(width: 4),
+        btn('-10', -10),
+        const SizedBox(width: 4),
+        btn('-5', -5),
+        const SizedBox(width: 4),
+        btn('-1', -1),
+        const SizedBox(width: 12),
+        btn('+1', 1),
+        const SizedBox(width: 4),
+        btn('+5', 5),
+        const SizedBox(width: 4),
         btn('+10', 10),
       ],
     );
@@ -235,13 +312,28 @@ class _TaskEditSheetState extends State<TaskEditSheet> {
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(border: Border.all(color: Colors.white10)),
         child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(label, style: const TextStyle(color: Colors.white38, fontFamily: 'monospace', fontSize: 9)),
-                Text(value, style: const TextStyle(color: Colors.white, fontFamily: 'monospace', fontSize: 13, fontWeight: FontWeight.bold)),
+                Text(
+                  label,
+                  style: const TextStyle(
+                    color: Colors.white38,
+                    fontFamily: 'monospace',
+                    fontSize: 9,
+                  ),
+                ),
+                Text(
+                  value,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontFamily: 'monospace',
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
               ],
             ),
             const Icon(Icons.edit, size: 14, color: Colors.white24),
@@ -269,7 +361,14 @@ class _TaskEditSheetState extends State<TaskEditSheet> {
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
       Text(label, style: const TextStyle(color: Colors.white38, fontSize: 8)),
-      Text(val, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
+      Text(
+        val,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 13,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
     ],
   );
 
@@ -280,8 +379,15 @@ class _TaskEditSheetState extends State<TaskEditSheet> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          const Text('ENABLE ALARM', style: TextStyle(color: Colors.white, fontSize: 11)),
-          Switch(value: isAlarmEnabled, onChanged: (v) => setState(() => isAlarmEnabled = v), activeColor: Colors.orangeAccent),
+          const Text(
+            'ENABLE ALARM',
+            style: TextStyle(color: Colors.white, fontSize: 11),
+          ),
+          Switch(
+            value: isAlarmEnabled,
+            onChanged: (v) => setState(() => isAlarmEnabled = v),
+            activeColor: Colors.orangeAccent,
+          ),
         ],
       ),
     );
@@ -296,26 +402,52 @@ class _TaskEditSheetState extends State<TaskEditSheet> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('REPEAT WEEKLY', style: TextStyle(color: Colors.white, fontSize: 11)),
-              Switch(value: isRecurring, onChanged: (v) => setState(() => isRecurring = v), activeColor: Colors.white),
+              const Text(
+                'REPEAT WEEKLY',
+                style: TextStyle(color: Colors.white, fontSize: 11),
+              ),
+              Switch(
+                value: isRecurring,
+                onChanged: (v) => setState(() => isRecurring = v),
+                activeColor: Colors.white,
+              ),
             ],
           ),
           if (isRecurring) ...[
             const SizedBox(height: 8),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: ['M', 'T', 'W', 'T', 'F', 'S', 'S'].asMap().entries.map((e) {
-                final d = e.key + 1;
-                final sel = recurringDays.contains(d);
-                return GestureDetector(
-                  onTap: () => setState(() => sel ? recurringDays.remove(d) : recurringDays.add(d)),
-                  child: Container(
-                    width: 32, height: 32,
-                    decoration: BoxDecoration(border: Border.all(color: sel ? Colors.white : Colors.white10), color: sel ? Colors.white : Colors.transparent),
-                    child: Center(child: Text(e.value, style: TextStyle(color: sel ? Colors.black : Colors.white38, fontSize: 10))),
-                  ),
-                );
-              }).toList(),
+              children: ['M', 'T', 'W', 'T', 'F', 'S', 'S'].asMap().entries.map(
+                (e) {
+                  final d = e.key + 1;
+                  final sel = recurringDays.contains(d);
+                  return GestureDetector(
+                    onTap: () => setState(
+                      () =>
+                          sel ? recurringDays.remove(d) : recurringDays.add(d),
+                    ),
+                    child: Container(
+                      width: 32,
+                      height: 32,
+                      decoration: BoxDecoration(
+                        border: Border.all(
+                          color: sel ? Colors.white : Colors.white10,
+                        ),
+                        color: sel ? Colors.white : Colors.transparent,
+                      ),
+                      child: Center(
+                        child: Text(
+                          e.value,
+                          style: TextStyle(
+                            color: sel ? Colors.black : Colors.white38,
+                            fontSize: 10,
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ).toList(),
             ),
           ],
         ],
@@ -331,7 +463,9 @@ class _TaskEditSheetState extends State<TaskEditSheet> {
             onTap: () async {
               if (titleCtrl.text.isEmpty) return;
               final task = TimeBlockTask(
-                id: widget.existing?.id ?? DateTime.now().millisecondsSinceEpoch.toString(),
+                id:
+                    widget.existing?.id ??
+                    DateTime.now().millisecondsSinceEpoch.toString(),
                 title: titleCtrl.text,
                 description: descCtrl.text,
                 tag: selectedTag,
@@ -352,7 +486,19 @@ class _TaskEditSheetState extends State<TaskEditSheet> {
               }
               if (mounted) Navigator.pop(context);
             },
-            child: Container(height: 48, color: Colors.white, child: const Center(child: Text('SAVE', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)))),
+            child: Container(
+              height: 48,
+              color: Colors.white,
+              child: const Center(
+                child: Text(
+                  'SAVE',
+                  style: TextStyle(
+                    color: Colors.black,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
           ),
         ),
         if (widget.existing != null) ...[
@@ -362,28 +508,48 @@ class _TaskEditSheetState extends State<TaskEditSheet> {
               await widget.planner.removeTask(widget.existing!.id);
               if (mounted) Navigator.pop(context);
             },
-            child: Container(width: 48, height: 48, decoration: BoxDecoration(border: Border.all(color: Colors.redAccent)), child: const Icon(Icons.delete_outline, color: Colors.redAccent)),
+            child: Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.redAccent),
+              ),
+              child: const Icon(Icons.delete_outline, color: Colors.redAccent),
+            ),
           ),
         ],
       ],
     );
   }
 
-  void _showNumberPicker(String title, int current, int min, int max, ValueChanged<int> onSelect) {
+  void _showNumberPicker(
+    String title,
+    int current,
+    int min,
+    int max,
+    ValueChanged<int> onSelect,
+  ) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: Colors.black,
-        title: Text(title, style: const TextStyle(color: Colors.white, fontSize: 14)),
+        title: Text(
+          title,
+          style: const TextStyle(color: Colors.white, fontSize: 14),
+        ),
         content: SizedBox(
-          width: double.maxFinite, height: 200,
+          width: double.maxFinite,
+          height: 200,
           child: ListView.builder(
             itemCount: max - min + 1,
             itemBuilder: (c, i) {
               final v = min + i;
               return ListTile(
                 title: Text('$v', style: const TextStyle(color: Colors.white)),
-                onTap: () { onSelect(v); Navigator.pop(c); },
+                onTap: () {
+                  onSelect(v);
+                  Navigator.pop(c);
+                },
               );
             },
           ),

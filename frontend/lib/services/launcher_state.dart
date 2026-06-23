@@ -45,6 +45,12 @@ class LauncherState extends ChangeNotifier {
   String _aiHeadline = 'Close distractions. Protect your attention.';
   String get aiHeadline => _aiHeadline;
 
+  // Battery Optimization State
+  bool _isBatteryOptimizationIgnored = true;
+  bool _showBatteryPrompt = false;
+  bool get isBatteryOptimizationIgnored => _isBatteryOptimizationIgnored;
+  bool get showBatteryPrompt => _showBatteryPrompt;
+
   Map<String, int> _weeklyStudyData = {};
   Map<String, int> get weeklyStudyData => _weeklyStudyData;
 
@@ -62,8 +68,10 @@ class LauncherState extends ChangeNotifier {
   // Pending seconds track time since last commit. These all belong to the current day.
   int _pomodoroPendingFocusSeconds = 0;
   int _pomodoroPendingTaskSeconds = 0;
+  int _pomodoroTickCounter = 0; // for periodic commits
   bool _pomodoroDirty = false;
   Timer? _pomodoroTimer;
+  String _lastCommitedDay = '';
 
   // New detailed analytics tracking
   List<int> _hourlyStudySeconds = List.filled(24, 0);
@@ -124,15 +132,25 @@ class LauncherState extends ChangeNotifier {
     await refreshAppsList();
     await _loadLocalStats();
     _initMethodChannel();
+    checkBatteryOptimizationStatus();
 
     // Once-a-day backend sync
     final prefs = await SharedPreferences.getInstance();
     final today = _todayKey();
     if (prefs.getString('last_sync_date') != today) {
       _syncStatsToBackend();
-      // Handle midnight shift: reset local study/distract seconds
+    }
+    
+    _lastCommitedDay = prefs.getString('last_commited_day') ?? today;
+    if (_lastCommitedDay != today) {
+      // Midnight shift happened!
       _studySeconds = 0;
       _distractedSeconds = 0;
+      _hourlyStudySeconds = List.filled(24, 0);
+      _taskStudySeconds = {};
+      _pomoSessions = [];
+      _lastCommitedDay = today;
+      await prefs.setString('last_commited_day', today);
       _saveLocalStats();
     }
   }
@@ -167,6 +185,7 @@ class LauncherState extends ChangeNotifier {
           _isBreak = isBreakVal;
           // Each tick = 1 second of focus time. Track as pending.
           if (_isPomodoroActive && !_isBreak) {
+            _checkMidnightReset();
             _pomodoroPendingFocusSeconds += 1;
             _pomodoroPendingTaskSeconds += 1;
             _pomodoroDirty = true;
@@ -174,6 +193,13 @@ class LauncherState extends ChangeNotifier {
             // Increment hourly bucket
             final hour = DateTime.now().hour;
             _hourlyStudySeconds[hour] += 1;
+
+            // Periodic commit every 60 seconds to prevent data loss
+            _pomodoroTickCounter++;
+            if (_pomodoroTickCounter >= 60) {
+              _pomodoroTickCounter = 0;
+              _commitPomodoroProgress(sync: true);
+            }
           }
           notifyListeners();
           break;
@@ -412,6 +438,28 @@ class LauncherState extends ChangeNotifier {
     return '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
   }
 
+  void _checkMidnightReset() async {
+    final today = _todayKey();
+    if (_lastCommitedDay != today && _lastCommitedDay.isNotEmpty) {
+      debugPrint("Midnight transition detected! Committing old day: $_lastCommitedDay");
+      // 1. Commit whatever was pending for the OLD day
+      await _commitPomodoroProgress(sync: true);
+      
+      // 2. Reset everything for the NEW day
+      _studySeconds = 0;
+      _distractedSeconds = 0;
+      _hourlyStudySeconds = List.filled(24, 0);
+      _taskStudySeconds = {};
+      _pomoSessions = [];
+      _lastCommitedDay = today;
+      
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('last_commited_day', today);
+      await _saveLocalStats();
+      notifyListeners();
+    }
+  }
+
   Future<void> _commitPomodoroProgress({bool sync = false}) async {
     if (_pomodoroPendingFocusSeconds <= 0) {
       if (sync && (await ApiService.getToken()) != null) {
@@ -517,6 +565,7 @@ class LauncherState extends ChangeNotifier {
     );
     await prefs.setString('pomo_sessions_$todayStr', jsonEncode(_pomoSessions));
     await prefs.setString('last_goal', _lastGoal);
+    await prefs.setString('last_commited_day', _lastCommitedDay);
     await loadWeeklyData();
   }
 
@@ -718,6 +767,10 @@ class LauncherState extends ChangeNotifier {
       await _syncStatsToBackend();
       notifyListeners();
     }
+  }
+
+  Future<void> syncStats() async {
+    await _syncStatsToBackend();
   }
 
   Future<void> _syncStatsToBackend() async {
@@ -1603,9 +1656,36 @@ class LauncherState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Public method for manual sync (pull-to-refresh)
-  Future<void> syncStats() async {
-    await _syncStatsToBackend();
+  // ── Battery Optimization ──
+
+  Future<void> checkBatteryOptimizationStatus() async {
+    try {
+      final ignored =
+          await _channel.invokeMethod<bool>('isBatteryOptimizationIgnored') ??
+          true;
+      _isBatteryOptimizationIgnored = ignored;
+      if (!ignored) {
+        _showBatteryPrompt = true;
+      }
+      notifyListeners();
+    } catch (_) {}
+  }
+
+  Future<void> requestIgnoreBatteryOptimizations() async {
+    try {
+      await _channel.invokeMethod('requestIgnoreBatteryOptimizations');
+      _showBatteryPrompt = false;
+      notifyListeners();
+      // Check again after a delay
+      Future.delayed(
+        const Duration(seconds: 5),
+        checkBatteryOptimizationStatus,
+      );
+    } catch (_) {}
+  }
+
+  void dismissBatteryPrompt() {
+    _showBatteryPrompt = false;
     notifyListeners();
   }
 }

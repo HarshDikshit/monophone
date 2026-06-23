@@ -43,6 +43,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   String? _error;
   final _shareKey = GlobalKey();
   Timer? _refreshTimer;
+  DateTime _windowDate = DateTime.now();
 
   @override
   void initState() {
@@ -82,20 +83,31 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       setState(() {
         _analytics = data;
       });
-    } catch (_) {
-      // Silent fail — don't show errors on auto-refresh
-    }
+    } catch (_) {}
   }
 
-  void _goPrev() =>
-      setState(() => _offset = math.min(_offset + 1, _maxOffset()));
-  void _goNext() => setState(() => _offset = math.max(_offset - 1, 0));
+  void _goPrev() {
+    setState(() {
+      if (_mode == _RangeMode.day) {
+        _windowDate = _windowDate.subtract(const Duration(days: 1));
+      } else if (_mode == _RangeMode.week) {
+        _windowDate = _windowDate.subtract(const Duration(days: 7));
+      } else {
+        _windowDate = DateTime(_windowDate.year, _windowDate.month - 1, 1);
+      }
+    });
+  }
 
-  int _maxOffset() {
-    final daily = (_analytics?['daily'] as List? ?? []);
-    if (_mode == _RangeMode.day) return math.max(0, daily.length - 1);
-    if (_mode == _RangeMode.week) return math.max(0, daily.length - 1);
-    return math.max(0, daily.length - 1);
+  void _goNext() {
+    setState(() {
+      if (_mode == _RangeMode.day) {
+        _windowDate = _windowDate.add(const Duration(days: 1));
+      } else if (_mode == _RangeMode.week) {
+        _windowDate = _windowDate.add(const Duration(days: 7));
+      } else {
+        _windowDate = DateTime(_windowDate.year, _windowDate.month + 1, 1);
+      }
+    });
   }
 
   Future<void> _shareAnalytics() async {
@@ -132,14 +144,13 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     });
     try {
       final state = context.read<LauncherState>();
-      await state.syncStats(); // Manual sync before fetching data
+      await state.syncStats();
       
       final data = await ApiService.getAnalytics(daysBack: 30);
       if (!mounted) return;
       setState(() {
         _analytics = data;
         _loading = false;
-        _offset = 0;
       });
     } catch (e) {
       if (!mounted) return;
@@ -150,155 +161,100 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     }
   }
 
-  _DateWindow _resolveWindow(_RangeMode mode, int offset) {
-    final daily = (_analytics?['daily'] as List? ?? [])
-        .map((e) => Map<String, dynamic>.from(e))
-        .toList();
-    if (daily.isEmpty) return const _DateWindow();
-    final allDates = daily.map((d) => d['date'] as String).toList();
+  _DateWindow _resolveWindow(_RangeMode mode, LauncherState state) {
+    final daily = _analytics?['daily'] as List? ?? [];
+    DateTime now = DateTime.now();
 
-    if (mode == _RangeMode.day) {
-      final idx = math.max(0, daily.length - 1 - offset);
-      final dayData = daily[idx];
-      return _DateWindow(
-        start: dayData['date'] as String,
-        end: dayData['date'] as String,
-        rangeLabel: _fmtDateLong(dayData['date'] as String),
-        days: [dayData],
-        hourly: List<int>.from(dayData['hourly'] ?? new List.filled(24, 0)),
-        sessions: List<Map<String, dynamic>>.from(dayData['sessions'] ?? []),
-        taskAnalytics: List<Map<String, dynamic>>.from(dayData['taskAnalytics'] ?? []),
-        allDates: allDates,
+    if (_mode == _RangeMode.day) {
+      final key =
+          '${_windowDate.year}-${_windowDate.month.toString().padLeft(2, '0')}-${_windowDate.day.toString().padLeft(2, '0')}';
+      final match = daily.firstWhere(
+        (d) => d['date'] == key,
+        orElse: () => {
+          'date': key,
+          'studySeconds': 0,
+          'distractedSeconds': 0,
+          'sessions': [],
+          'taskAnalytics': [],
+        },
       );
-    }
-    if (mode == _RangeMode.week) {
-      final endIdx = math.max(0, daily.length - 1 - offset * 7);
-      final startIdx = math.max(0, endIdx - 6);
-      final slice = daily.sublist(startIdx, endIdx + 1);
-      final aggregatedHourly = List.filled(24, 0);
-      final allSessions = <Map<String, dynamic>>[];
-      final allTaskAnalytics = <Map<String, dynamic>>[];
-      for (final d in slice) {
-        final h = List<int>.from(d['hourly'] ?? List.filled(24, 0));
-        for (int i = 0; i < 24; i++) aggregatedHourly[i] += h[i];
-        allSessions.addAll(List<Map<String, dynamic>>.from(d['sessions'] ?? []));
-        allTaskAnalytics.addAll(List<Map<String, dynamic>>.from(d['taskAnalytics'] ?? []));
+
+      final todayKey =
+          '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+      int studySec = (match['studySeconds'] as num? ?? 0).toInt();
+      List sessions = List.from(match['sessions'] as List? ?? []);
+      List taskAnalytics = List.from(match['taskAnalytics'] as List? ?? []);
+
+      if (key == todayKey) {
+        studySec = state.studySeconds;
       }
+
       return _DateWindow(
-        start: slice.first['date'] as String,
-        end: slice.last['date'] as String,
-        rangeLabel:
-            '${_fmtDateShort(slice.first['date'] as String)} - ${_fmtDateShort(slice.last['date'] as String)}',
-        days: slice,
-        hourly: aggregatedHourly,
-        sessions: allSessions,
-        taskAnalytics: allTaskAnalytics,
-        allDates: allDates,
+        title: key == todayKey ? 'TODAY' : key,
+        totalStudySeconds: studySec,
+        totalDistractedSeconds: (match['distractedSeconds'] as num? ?? 0).toInt(),
+        days: [match.cast<String, dynamic>()],
+        sessions: List<Map<String, dynamic>>.from(sessions),
+        taskAnalytics: List<Map<String, dynamic>>.from(taskAnalytics),
+      );
+    } else if (_mode == _RangeMode.week) {
+      final monday = _windowDate.subtract(Duration(days: _windowDate.weekday - 1));
+      final sunday = monday.add(const Duration(days: 6));
+      
+      final startDate = DateTime(monday.year, monday.month, monday.day);
+      final endDate = DateTime(sunday.year, sunday.month, sunday.day, 23, 59, 59);
+
+      final weekDays = daily.where((d) {
+        final dDate = DateTime.tryParse(d['date'] as String ?? '');
+        return dDate != null &&
+            dDate.isAfter(startDate.subtract(const Duration(seconds: 1))) &&
+            dDate.isBefore(endDate.add(const Duration(seconds: 1)));
+      }).toList();
+
+      final totalStudy = weekDays.fold(0, (a, b) => a + (b['studySeconds'] as num? ?? 0).toInt());
+      final totalDistracted = weekDays.fold(0, (a, b) => a + (b['distractedSeconds'] as num? ?? 0).toInt());
+
+      return _DateWindow(
+        title: '${_fmtDate(startDate)} - ${_fmtDate(endDate)}',
+        totalStudySeconds: totalStudy,
+        totalDistractedSeconds: totalDistracted,
+        days: weekDays.cast<Map<String, dynamic>>(),
+        sessions: weekDays.expand((d) => (d['sessions'] as List? ?? [])).cast<Map<String, dynamic>>().toList(),
+        taskAnalytics: weekDays.expand((d) => (d['taskAnalytics'] as List? ?? [])).cast<Map<String, dynamic>>().toList(),
+      );
+    } else {
+      final startOfMonth = DateTime(_windowDate.year, _windowDate.month, 1);
+      final nextMonth = DateTime(_windowDate.year, _windowDate.month + 1, 1);
+
+      final monthDays = daily.where((d) {
+        final dDate = DateTime.tryParse(d['date'] as String ?? '');
+        return dDate != null &&
+            dDate.isAfter(startOfMonth.subtract(const Duration(seconds: 1))) &&
+            dDate.isBefore(nextMonth);
+      }).toList();
+
+      final totalStudy = monthDays.fold(0, (a, b) => a + (b['studySeconds'] as num? ?? 0).toInt());
+      final totalDistracted = monthDays.fold(0, (a, b) => a + (b['distractedSeconds'] as num? ?? 0).toInt());
+
+      return _DateWindow(
+        title: '${_monthTitle(startOfMonth.month)} ${startOfMonth.year}',
+        totalStudySeconds: totalStudy,
+        totalDistractedSeconds: totalDistracted,
+        days: monthDays.cast<Map<String, dynamic>>(),
+        sessions: monthDays.expand((d) => (d['sessions'] as List? ?? [])).cast<Map<String, dynamic>>().toList(),
+        taskAnalytics: monthDays.expand((d) => (d['taskAnalytics'] as List? ?? [])).cast<Map<String, dynamic>>().toList(),
       );
     }
-    // month
-    final endIdx = math.max(0, daily.length - 1 - offset * 30);
-    final startIdx = math.max(0, endIdx - 29);
-    final slice = daily.sublist(startIdx, endIdx + 1);
-    final aggregatedHourly = List.filled(24, 0);
-    final allSessions = <Map<String, dynamic>>[];
-    final allTaskAnalytics = <Map<String, dynamic>>[];
-    for (final d in slice) {
-      final h = List<int>.from(d['hourly'] ?? List.filled(24, 0));
-      for (int i = 0; i < 24; i++) aggregatedHourly[i] += h[i];
-      allSessions.addAll(List<Map<String, dynamic>>.from(d['sessions'] ?? []));
-      allTaskAnalytics.addAll(List<Map<String, dynamic>>.from(d['taskAnalytics'] ?? []));
-    }
-    return _DateWindow(
-      start: slice.first['date'] as String,
-      end: slice.last['date'] as String,
-      rangeLabel: _fmtMonthYear(slice.first['date'] as String),
-      days: slice,
-      hourly: aggregatedHourly,
-      sessions: allSessions,
-      taskAnalytics: allTaskAnalytics,
-      allDates: allDates,
-    );
   }
 
-  List<int> _synthesizeHourly(
-    List<Map<String, dynamic>> days,
-    List<dynamic> hourlyRaw,
-  ) {
-    if (days.length != 1) return List.filled(24, 0);
-    final hourly = hourlyRaw.map((e) => (e as num).toInt()).toList();
-    if (hourly.length != 24) return List.filled(24, 0);
-    final dayTotal = ((days.first['studySeconds'] as num?) ?? 0).toInt();
-    final sum = hourly.fold<int>(0, (a, b) => a + b);
-    if (sum == 0) return List.filled(24, 0);
-    return hourly.map((v) => (v * dayTotal / sum).round()).toList();
-  }
-
-  String _fmtDateLong(String iso) {
-    final p = iso.split('-');
-    if (p.length != 3) return iso;
-    const m = [
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec',
-    ];
-    return '${int.tryParse(p[2]) ?? 0} ${m[(int.tryParse(p[1]) ?? 1) - 1]} ${p[0]}';
-  }
-
-  String _fmtDateShort(String iso) {
-    final p = iso.split('-');
-    if (p.length != 3) return iso;
-    const m = [
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec',
-    ];
-    return '${int.tryParse(p[2]) ?? 0} ${m[(int.tryParse(p[1]) ?? 1) - 1]}';
-  }
-
-  String _fmtMonthYear(String iso) {
-    final p = iso.split('-');
-    if (p.length != 3) return iso;
-    const m = [
-      'January',
-      'February',
-      'March',
-      'April',
-      'May',
-      'June',
-      'July',
-      'August',
-      'September',
-      'October',
-      'November',
-      'December',
-    ];
-    return '${m[(int.tryParse(p[1]) ?? 1) - 1]} ${p[0]}';
-  }
+  String _fmtDate(DateTime d) => '${d.month}/${d.day}';
+  String _monthTitle(int m) => ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m-1];
 
   @override
   Widget build(BuildContext context) {
     final state = Provider.of<LauncherState>(context);
     final user = state.userProfile ?? const <String, dynamic>{};
-    final window = _resolveWindow(_mode, _offset);
+    final window = _resolveWindow(_mode, state);
 
     return Scaffold(
       backgroundColor: _bg,
@@ -353,46 +309,36 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                         children: [
                           _ProfileHeader(
                             name: (user['name'] ?? 'focus-hero').toString(),
-                            rangeLabel: window.rangeLabel,
+                            rangeLabel: window.title,
                           ),
                           const SizedBox(height: 20),
                           _RangeToggle(
                             mode: _mode,
                             onChanged: (m) => setState(() {
                               _mode = m;
-                              _offset = 0;
+                              _windowDate = DateTime.now();
                             }),
                           ),
                           const SizedBox(height: 16),
                           _NavBar(
-                            canGoBack: _offset < _maxOffset(),
-                            canGoForward: _offset > 0,
                             onBack: _goPrev,
                             onForward: _goNext,
+                            canBack: true,
+                            canForward: !_isSameDay(_windowDate, DateTime.now()),
                           ),
                           const SizedBox(height: 16),
-                          _StatsRow(
-                            window: window,
-                            completedTasks: _completedTaskCount(state, window),
-                            nonCompletedTasks: _nonCompletedTaskCount(
-                              state,
-                              window,
-                            ),
-                          ),
+                          if (state.showBatteryPrompt) ...[
+                            _BatteryPromptCard(state: state),
+                            const SizedBox(height: 16),
+                          ],
+                          _SummaryStats(window: window),
                           const SizedBox(height: 18),
-                          _FocusPeriodsCard(
-                            mode: _mode,
-                            window: window,
-                          ),
-                          const SizedBox(height: 18),
-                          _FocusDistributionCard(window: window, state: state),
-                          const SizedBox(height: 18),
-                          _TaskAnalyticsCard(window: window),
-                          const SizedBox(height: 18),
-                          if (_mode != _RangeMode.day) ...[
-                            _FocusTimeBarCard(days: window.days),
+                          if (_mode == _RangeMode.day) ...[
+                            _FocusPeriodsCard(mode: _mode, window: window),
                             const SizedBox(height: 18),
                           ],
+                          _TaskAnalyticsCard(window: window),
+                          const SizedBox(height: 18),
                           _GoalAchievementCard(
                             mode: _mode,
                             window: window,
@@ -418,61 +364,247 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   }
 
   (int, int) _taskCounts(LauncherState state, _DateWindow window) {
-    final tasks = state.tasks;
-    if (tasks.isEmpty) return (0, 0);
-    final start = DateTime.parse('${window.start}T00:00:00');
-    final end = DateTime.parse('${window.end}T23:59:59');
+    if (window.days.isEmpty) return (0, 0);
+    
+    // Find the date range from the window days
+    final firstDayStr = window.days.first['date'] as String;
+    final lastDayStr = window.days.last['date'] as String;
+    final start = DateTime.parse(firstDayStr);
+    final end = DateTime.parse(lastDayStr).add(const Duration(hours: 23, minutes: 59, seconds: 59));
+
     int completed = 0;
     int nonCompleted = 0;
-    for (final t in tasks) {
-      final isDone = t['isDone'] == true;
-      final created = t['createdAt'];
-      bool inWindow = false;
-      if (created is String) {
-        try {
-          final d = DateTime.parse(created);
-          if (!d.isBefore(start) && !d.isAfter(end)) {
-            inWindow = true;
-          }
-        } catch (_) {}
-      }
-      if (!inWindow && _mode == _RangeMode.day) {
-        inWindow = true;
-      }
-      if (inWindow) {
-        if (isDone) {
+    
+    for (final t in state.planner?.tasks ?? []) {
+      if (t.isCompleted && t.completedAt != null) {
+        if (!t.completedAt!.isBefore(start) && !t.completedAt!.isAfter(end)) {
           completed++;
-        } else {
+        }
+      } else if (!t.isCompleted) {
+        // For non-completed, check if created in window
+        if (!t.startTime.isBefore(start) && !t.startTime.isAfter(end)) {
           nonCompleted++;
         }
       }
     }
     return (completed, nonCompleted);
   }
+
+  bool _isSameDay(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
+}
+
+// ── Battery Prompt Card ──────────────────────────────────────────
+class _BatteryPromptCard extends StatelessWidget {
+  final LauncherState state;
+  const _BatteryPromptCard({required this.state});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF151500),
+        border: Border.all(color: Colors.orange.withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.battery_alert, color: Colors.orange, size: 20),
+              const SizedBox(width: 8),
+              const Text(
+                'BATTERY OPTIMIZED',
+                style: TextStyle(
+                  color: Colors.orange,
+                  fontFamily: 'monospace',
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const Spacer(),
+              IconButton(
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+                icon: const Icon(Icons.close, color: _dim, size: 16),
+                onPressed: state.dismissBatteryPrompt,
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'To ensure reliable focus tracking in the background, please set the app battery usage to "Unrestricted" in system settings.',
+            style: TextStyle(color: _text, fontSize: 13, height: 1.4),
+          ),
+          const SizedBox(height: 12),
+          TextButton(
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              backgroundColor: Colors.orange.withOpacity(0.1),
+              side: BorderSide(color: Colors.orange.withOpacity(0.3)),
+            ),
+            onPressed: state.requestIgnoreBatteryOptimizations,
+            child: const Text(
+              'OPEN SETTINGS',
+              style: TextStyle(
+                color: Colors.orange,
+                fontFamily: 'monospace',
+                fontSize: 11,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Summary Stats ──────────────────────────────────────────────────
+class _SummaryStats extends StatelessWidget {
+  final _DateWindow window;
+  const _SummaryStats({required this.window});
+
+  @override
+  Widget build(BuildContext context) {
+    final state = context.watch<LauncherState>();
+    final stats = _getStats(state, window);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+      decoration: BoxDecoration(
+        color: _card,
+        border: Border.all(color: _border),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: stats
+            .map((s) => _StatItem(
+                  label: s.label,
+                  value: s.value,
+                  subValue: s.subValue,
+                ))
+            .toList(),
+      ),
+    );
+  }
+
+  List<_StatData> _getStats(LauncherState state, _DateWindow window) {
+    if (window.days.isEmpty) return [
+      _StatData(label: 'Focus Time', value: '0h', subValue: '0m'),
+      _StatData(label: 'Tasks Done', value: '0', subValue: 'completed'),
+    ];
+
+    final firstDayStr = window.days.first['date'] as String;
+    final lastDayStr = window.days.last['date'] as String;
+    
+    final firstDay = DateTime.parse(firstDayStr);
+    final lastDay = DateTime.parse(lastDayStr);
+    
+    final windowStart = DateTime(firstDay.year, firstDay.month, firstDay.day);
+    final windowEnd = DateTime(lastDay.year, lastDay.month, lastDay.day, 23, 59, 59);
+
+    int completedCount = 0;
+    for (final t in state.planner?.tasks ?? []) {
+      if (t.isCompleted && t.completedAt != null) {
+        if (t.completedAt!.isAfter(windowStart.subtract(const Duration(seconds: 1))) &&
+            t.completedAt!.isBefore(windowEnd.add(const Duration(seconds: 1)))) {
+          completedCount++;
+        }
+      }
+    }
+
+    final s = window.totalStudySeconds;
+    final h = s ~/ 3600;
+    final m = (s % 3600) ~/ 60;
+
+    return [
+      _StatData(
+        label: 'Focus Time',
+        value: '${h}h',
+        subValue: '${m}m',
+      ),
+      _StatData(
+        label: 'Tasks Done',
+        value: '$completedCount',
+        subValue: 'completed',
+      ),
+    ];
+  }
+}
+
+class _StatData {
+  final String label, value, subValue;
+  _StatData({required this.label, required this.value, required this.subValue});
+}
+
+class _StatItem extends StatelessWidget {
+  final String label, value, subValue;
+  const _StatItem({required this.label, required this.value, required this.subValue});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            color: _dim,
+            fontSize: 9,
+            fontFamily: 'monospace',
+            letterSpacing: 1,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.baseline,
+          textBaseline: TextBaseline.alphabetic,
+          children: [
+            Text(
+              value,
+              style: const TextStyle(
+                color: _white,
+                fontSize: 22,
+                fontWeight: FontWeight.w200,
+                fontFamily: 'monospace',
+              ),
+            ),
+            if (subValue.isNotEmpty) ...[
+              const SizedBox(width: 4),
+              Text(
+                subValue,
+                style: const TextStyle(
+                  color: _dim,
+                  fontSize: 10,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ],
+          ],
+        ),
+      ],
+    );
+  }
 }
 
 // ── Model ────────────────────────────────────────────────────────────
 class _DateWindow {
-  final String start, end, rangeLabel;
+  final String title;
+  final int totalStudySeconds;
+  final int totalDistractedSeconds;
   final List<Map<String, dynamic>> days;
-  final List<int> hourly;
   final List<Map<String, dynamic>> sessions;
   final List<Map<String, dynamic>> taskAnalytics;
-  final List<String> allDates; // full available dates for offset calc
+  
   const _DateWindow({
-    this.start = '',
-    this.end = '',
-    this.rangeLabel = '',
+    this.title = '',
+    this.totalStudySeconds = 0,
+    this.totalDistractedSeconds = 0,
     this.days = const [],
-    this.hourly = const [],
     this.sessions = const [],
     this.taskAnalytics = const [],
-    this.allDates = const [],
   });
-  int get totalStudySeconds => days.fold<int>(
-    0,
-    (a, d) => a + ((d['studySeconds'] as num?) ?? 0).toInt(),
-  );
 }
 
 String _fmtHM(int s) {
@@ -492,13 +624,13 @@ String _fmtHMD(int s) {
 
 // ── Navigation Bar ──────────────────────────────────────────────────
 class _NavBar extends StatelessWidget {
-  final bool canGoBack, canGoForward;
   final VoidCallback onBack, onForward;
+  final bool canBack, canForward;
   const _NavBar({
-    required this.canGoBack,
-    required this.canGoForward,
     required this.onBack,
     required this.onForward,
+    this.canBack = true,
+    this.canForward = true,
   });
 
   @override
@@ -507,19 +639,19 @@ class _NavBar extends StatelessWidget {
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         GestureDetector(
-          onTap: canGoBack ? onBack : null,
+          onTap: canBack ? onBack : null,
           child: Icon(
             Icons.chevron_left,
-            color: canGoBack ? _white : _border,
+            color: canBack ? _white : _dim,
             size: 28,
           ),
         ),
-        const SizedBox(width: 16),
+        const SizedBox(width: 24),
         GestureDetector(
-          onTap: canGoForward ? onForward : null,
+          onTap: canForward ? onForward : null,
           child: Icon(
             Icons.chevron_right,
-            color: canGoForward ? _white : _border,
+            color: canForward ? _white : _dim,
             size: 28,
           ),
         ),
@@ -1558,9 +1690,11 @@ class _FocusTimeBarCardState extends State<_FocusTimeBarCard> {
     final values = days
         .map((d) => (((d['studySeconds'] as num?) ?? 0).toInt()) / 3600.0)
         .toList();
-    final maxV = values.isEmpty
-        ? 1.0
-        : values.reduce((a, b) => a > b ? a : b).clamp(0.5, double.infinity);
+    
+    final double maxActual = values.isEmpty ? 0.0 : values.reduce((a, b) => a > b ? a : b);
+    // Ceiling Logic: Round up to next hour, plus a 1h buffer to show a "gap"
+    final double maxV = (maxActual + 1.0).ceilToDouble();
+    
     final activeDays = values.where((v) => v > 0).length;
     final avg = values.isEmpty
         ? 0.0

@@ -324,6 +324,14 @@ class MainActivity : FlutterActivity() {
                     result.success(true)
                 }
 
+                "isBatteryOptimizationIgnored" -> {
+                    result.success(isBatteryOptimizationIgnored())
+                }
+                "requestIgnoreBatteryOptimizations" -> {
+                    requestIgnoreBatteryOptimizations()
+                    result.success(true)
+                }
+
                 else -> {
                     result.notImplemented()
                 }
@@ -678,13 +686,6 @@ class MainActivity : FlutterActivity() {
         startActivity(intent)
     }
 
-    /**
-     * Start or stop [GrayscaleOverlayService].
-     *
-     * This replaces the previous Settings.Secure approach which required
-     * WRITE_SECURE_SETTINGS (a signature/privileged permission — unavailable
-     * to normal apps).  The overlay approach works with just SYSTEM_ALERT_WINDOW.
-     */
     private fun toggleGrayscaleOverlay(enabled: Boolean) {
         if (enabled) {
             val intent = Intent(this, GrayscaleOverlayService::class.java)
@@ -698,6 +699,32 @@ class MainActivity : FlutterActivity() {
                 action = GrayscaleOverlayService.ACTION_STOP
             }
             startService(intent)
+        }
+    }
+
+    private fun isBatteryOptimizationIgnored(): Boolean {
+        val powerManager = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            powerManager.isIgnoringBatteryOptimizations(packageName)
+        } else {
+            true
+        }
+    }
+
+    private fun requestIgnoreBatteryOptimizations() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                data = Uri.parse("package:$packageName")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            try {
+                startActivity(intent)
+            } catch (e: Exception) {
+                val fallbackIntent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                startActivity(fallbackIntent)
+            }
         }
     }
 }
