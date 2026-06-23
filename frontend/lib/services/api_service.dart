@@ -317,12 +317,16 @@ class ApiService {
   // Supports offline fallback: caches last successful response in SharedPreferences.
   static const _analyticsCacheKey = 'analytics_cache_json';
 
-  static Future<Map<String, dynamic>> getAnalytics({int daysBack = 30}) async {
+  static Future<Map<String, dynamic>> getAnalytics({int daysBack = 30, String? studentId}) async {
     final token = await getToken();
     try {
+      String url = '$baseUrl/analytics?days=$daysBack';
+      if (studentId != null) {
+        url += '&studentId=$studentId';
+      }
       final response = await http
           .get(
-            Uri.parse('$baseUrl/analytics?days=$daysBack'),
+            Uri.parse(url),
             headers: _headers(token),
           )
           .timeout(const Duration(seconds: 10));
@@ -502,11 +506,37 @@ class ApiService {
       Uri.parse('$baseUrl/rankings?category=$category&skip=$skip&limit=$limit'),
       headers: _headers(token),
     );
+
+    if (response.statusCode == 200) {
+      if (response.headers['content-type']?.contains('application/json') ?? false) {
+        return jsonDecode(response.body);
+      }
+      throw Exception('Unexpected response format: ${response.headers['content-type']}');
+    }
+
+    String message = 'Failed to load rankings';
+    if (response.headers['content-type']?.contains('application/json') ?? false) {
+      try {
+        message = jsonDecode(response.body)['message'] ?? message;
+      } catch (_) {}
+    } else {
+      message = 'Server error (${response.statusCode}). Please ensure backend is running.';
+    }
+    throw Exception(message);
+  }
+
+  // Parent: Get Linked Students
+  static Future<List<dynamic>> getLinkedStudents() async {
+    final token = await getToken();
+    final response = await http.get(
+      Uri.parse('$baseUrl/parent/students'),
+      headers: _headers(token),
+    );
     if (response.statusCode == 200) {
       return jsonDecode(response.body);
     }
     throw Exception(
-      jsonDecode(response.body)['message'] ?? 'Failed to load rankings',
+      jsonDecode(response.body)['message'] ?? 'Failed to get linked students',
     );
   }
 

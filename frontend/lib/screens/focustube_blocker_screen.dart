@@ -16,8 +16,7 @@ class FocusTubeBlockerScreen extends StatefulWidget {
 }
 
 class _FocusTubeBlockerScreenState extends State<FocusTubeBlockerScreen> {
-  int _selectedTab =
-      3; // Start on the "Blocks" tab (index 3) to match screenshot
+  // Removed _selectedTab state and unnecessary tabs
 
   // Local Blocker configuration states (synced with BlockerService)
   bool _isStrictMode = false;
@@ -132,386 +131,12 @@ class _FocusTubeBlockerScreenState extends State<FocusTubeBlockerScreen> {
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
-        child: Column(
-          children: [
-            Expanded(child: _buildTabContent()),
-            _buildCustomBottomNavBar(),
-          ],
-        ),
+        child: _buildBlocksTab(),
       ),
     );
   }
 
-  Widget _buildTabContent() {
-    switch (_selectedTab) {
-      case 0:
-        return _buildFocusTab();
-      case 1:
-        return _buildPlannerTab();
-      case 2:
-        return _buildGroupsTab();
-      case 3:
-      default:
-        return _buildBlocksTab();
-    }
-  }
-
-  // ── 1. FOCUS TAB (Pomodoro Timer) ──────────────────────────────────────────
-  Widget _buildFocusTab() {
-    final state = context.watch<LauncherState>();
-    final minutes = state.pomodoroSecondsRemaining ~/ 60;
-    final seconds = state.pomodoroSecondsRemaining % 60;
-    final timerString =
-        "${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}";
-
-    return Padding(
-      padding: const EdgeInsets.all(24.0),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(
-            state.isBreak ? "BREAK TIME" : "FOCUS SESSION",
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 14,
-              fontFamily: 'monospace',
-              letterSpacing: 2,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          Stack(
-            alignment: Alignment.center,
-            children: [
-              SizedBox(
-                width: 240,
-                height: 240,
-                child: CircularProgressIndicator(
-                  value: state.customDurationSeconds > 0
-                      ? state.pomodoroSecondsRemaining /
-                            state.customDurationSeconds
-                      : 0,
-                  strokeWidth: 4,
-                  valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
-                  backgroundColor: Colors.white10,
-                ),
-              ),
-              Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    timerString,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 48,
-                      fontFamily: 'monospace',
-                      fontWeight: FontWeight.w100,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    state.lastGoal.isNotEmpty ? state.lastGoal : "Task Focus",
-                    style: const TextStyle(
-                      color: Colors.white38,
-                      fontSize: 12,
-                      fontFamily: 'monospace',
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-          Column(
-            children: [
-              GestureDetector(
-                onTap: () {
-                  if (state.isPomodoroActive) {
-                    state.stopPomodoro(manual: true);
-                  } else {
-                    state.startPomodoro();
-                  }
-                },
-                child: Container(
-                  height: 55,
-                  decoration: BoxDecoration(
-                    border: Border.all(color: Colors.white),
-                    color: state.isPomodoroActive
-                        ? Colors.transparent
-                        : Colors.white,
-                  ),
-                  child: Center(
-                    child: Text(
-                      state.isPomodoroActive ? "ABORT FOCUS" : "START FOCUS",
-                      style: TextStyle(
-                        color: state.isPomodoroActive
-                            ? Colors.white
-                            : Colors.black,
-                        letterSpacing: 2,
-                        fontWeight: FontWeight.bold,
-                        fontFamily: 'monospace',
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ── 2. PLANNER TAB (Tasks Manager) ─────────────────────────────────────────
-  Widget _buildPlannerTab() {
-    final state = context.watch<LauncherState>();
-
-    return Padding(
-      padding: const EdgeInsets.all(24.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const Text(
-            "PLANNER",
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 18,
-              fontFamily: 'monospace',
-              letterSpacing: 2,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _taskController,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontFamily: 'monospace',
-                  ),
-                  decoration: const InputDecoration(
-                    hintText: "Add focus task...",
-                    hintStyle: TextStyle(
-                      color: Colors.white24,
-                      fontFamily: 'monospace',
-                    ),
-                    enabledBorder: UnderlineInputBorder(
-                      borderSide: BorderSide(color: Colors.white24),
-                    ),
-                    focusedBorder: UnderlineInputBorder(
-                      borderSide: BorderSide(color: Colors.white),
-                    ),
-                  ),
-                ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.add, color: Colors.white),
-                onPressed: () {
-                  final text = _taskController.text.trim();
-                  if (text.isNotEmpty) {
-                    state.addTask(text);
-                    _taskController.clear();
-                  }
-                },
-              ),
-            ],
-          ),
-          const SizedBox(height: 24),
-          Expanded(
-            child: ListView.separated(
-              itemCount: state.tasks.length,
-              separatorBuilder: (_, __) => const Divider(color: Colors.white10),
-              itemBuilder: (context, index) {
-                final task = state.tasks[index];
-                final isDone = task['isDone'] == true;
-                final minutes = (task['focusSeconds'] ?? 0) ~/ 60;
-
-                return Row(
-                  children: [
-                    Checkbox(
-                      value: isDone,
-                      activeColor: Colors.white,
-                      checkColor: Colors.black,
-                      onChanged: (_) => state.toggleTaskComplete(task['id']),
-                    ),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            task['title'] ?? '',
-                            style: TextStyle(
-                              color: isDone ? Colors.white30 : Colors.white,
-                              decoration: isDone
-                                  ? TextDecoration.lineThrough
-                                  : null,
-                              fontFamily: 'monospace',
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            "$minutes mins studied",
-                            style: const TextStyle(
-                              color: Colors.white24,
-                              fontSize: 10,
-                              fontFamily: 'monospace',
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(
-                        Icons.delete_outline,
-                        color: Colors.white30,
-                        size: 18,
-                      ),
-                      onPressed: () => state.deleteTask(task['id']),
-                    ),
-                  ],
-                );
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ── 3. GROUPS TAB (Accountability/Parents) ──────────────────────────────────
-  Widget _buildGroupsTab() {
-    final state = context.watch<LauncherState>();
-    final user = state.userProfile;
-    final isParent = user?['role'] == 'parent';
-
-    return Padding(
-      padding: const EdgeInsets.all(24.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            isParent ? "PARENT MONITOR" : "GROUPS & ACCOUNTABILITY",
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 18,
-              fontFamily: 'monospace',
-              letterSpacing: 2,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Expanded(
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      border: Border.all(color: Colors.white12),
-                    ),
-                    child: Column(
-                      children: [
-                        const Text(
-                          "PARENT INTERFACE",
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontFamily: 'monospace',
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        Text(
-                          isParent
-                              ? "You are logged in as a parent. Pair with your child's app to view focus stats."
-                              : "Invite a parent to link. Generate a 6-digit access code below.",
-                          style: const TextStyle(
-                            color: Colors.white54,
-                            fontSize: 12,
-                            height: 1.5,
-                            fontFamily: 'monospace',
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 16),
-                        if (!isParent)
-                          GestureDetector(
-                            onTap: () {
-                              showDialog(
-                                context: context,
-                                builder: (_) => AlertDialog(
-                                  backgroundColor: Colors.black,
-                                  shape: Border.all(color: Colors.white24),
-                                  title: const Text(
-                                    "PAIRING CODE",
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontFamily: 'monospace',
-                                    ),
-                                  ),
-                                  content: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      const Text(
-                                        "749294",
-                                        style: TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 32,
-                                          fontWeight: FontWeight.bold,
-                                          letterSpacing: 6,
-                                          fontFamily: 'monospace',
-                                        ),
-                                      ),
-                                      const SizedBox(height: 16),
-                                      QrImageView(
-                                        data: "749294",
-                                        version: QrVersions.auto,
-                                        size: 160.0,
-                                        eyeStyle: const QrEyeStyle(
-                                          eyeShape: QrEyeShape.square,
-                                          color: Colors.white,
-                                        ),
-                                        dataModuleStyle:
-                                            const QrDataModuleStyle(
-                                              dataModuleShape:
-                                                  QrDataModuleShape.square,
-                                              color: Colors.white,
-                                            ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              );
-                            },
-                            child: Container(
-                              height: 42,
-                              decoration: BoxDecoration(
-                                border: Border.all(color: Colors.white),
-                              ),
-                              child: const Center(
-                                child: Text(
-                                  "GENERATE PAIRING CODE",
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 11,
-                                    letterSpacing: 1,
-                                    fontFamily: 'monospace',
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  // Removed _buildTabContent, _buildFocusTab, _buildPlannerTab, and _buildGroupsTab
 
   // ── 4. BLOCKS TAB (Dashboard blocker) ──────────────────────────────────────
   Widget _buildBlocksTab() {
@@ -523,6 +148,37 @@ class _FocusTubeBlockerScreenState extends State<FocusTubeBlockerScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // Permission Warnings
+            FutureBuilder<bool>(
+              future: state.isAccessibilityServiceEnabled(),
+              builder: (context, snapshot) {
+                final isEnabled = snapshot.data ?? true;
+                if (isEnabled) return const SizedBox.shrink();
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 16.0),
+                  child: _buildWarningBanner(
+                    "Accessibility Service Off",
+                    "Required for Shorts/Reels blocking.",
+                    () => state.openAccessibilitySettings(),
+                  ),
+                );
+              },
+            ),
+            FutureBuilder<bool>(
+              future: state.hasUsageAccessPermission(),
+              builder: (context, snapshot) {
+                final isEnabled = snapshot.data ?? true;
+                if (isEnabled) return const SizedBox.shrink();
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 16.0),
+                  child: _buildWarningBanner(
+                    "Usage Access Missing",
+                    "Required for App Limits & Stats.",
+                    () => state.requestUsageAccessPermission(),
+                  ),
+                );
+              },
+            ),
             // Top Bar
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -594,7 +250,19 @@ class _FocusTubeBlockerScreenState extends State<FocusTubeBlockerScreen> {
                 const Spacer(),
                 if (!_isLocked)
                   GestureDetector(
-                    onTap: _showAddAppLimitDialog,
+                    onTap: () async {
+                      final hasAccess = await state.hasUsageAccessPermission();
+                      if (!hasAccess) {
+                        _showPermissionAlert(
+                          title: "USAGE ACCESS REQUIRED",
+                          description:
+                              "To track app usage and enforce limits, you need to enable Usage Access in Android settings.",
+                          onFix: () => state.requestUsageAccessPermission(),
+                        );
+                        return;
+                      }
+                      _showAddAppLimitDialog();
+                    },
                     child: Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 10,
@@ -970,7 +638,11 @@ class _FocusTubeBlockerScreenState extends State<FocusTubeBlockerScreen> {
                     inactiveTrackColor: Colors.white10,
                     onChanged: _isLocked
                         ? null
-                        : (val) {
+                        : (val) async {
+                            if (val) {
+                              // VPN requires native permission which is handled by Android dialog usually, 
+                              // but we can add a check if we want. For now, focus on the user's explicit asks.
+                            }
                             setState(() => _vpnContentFilter = val);
                             _saveSettings();
                           },
@@ -1024,7 +696,19 @@ class _FocusTubeBlockerScreenState extends State<FocusTubeBlockerScreen> {
                     inactiveTrackColor: Colors.white10,
                     onChanged: _isLocked
                         ? null
-                        : (val) {
+                        : (val) async {
+                            if (val) {
+                              final hasSecure = await state.hasWriteSecureSettingsPermission();
+                              if (!hasSecure) {
+                                _showPermissionAlert(
+                                  title: "SECURE SETTINGS REQUIRED",
+                                  description:
+                                      "System-wide monochrome mode requires a special permission that must be granted once via ADB:\n\nadb shell pm grant com.dixit.monophone android.permission.WRITE_SECURE_SETTINGS",
+                                  onFix: null, // User must do this via PC
+                                );
+                                return;
+                              }
+                            }
                             setState(() => _monochromeMode = val);
                             _saveSettings();
                           },
@@ -2307,96 +1991,72 @@ class _FocusTubeBlockerScreenState extends State<FocusTubeBlockerScreen> {
     );
   }
 
-  // ── CUSTOM BOTTOM NAVIGATION BAR ───────────────────────────────────────────
-  Widget _buildCustomBottomNavBar() {
-    return Container(
-      height: 72,
-      decoration: const BoxDecoration(
-        color: Colors.black,
-        border: Border(top: BorderSide(color: Colors.white10, width: 0.5)),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        children: [
-          _buildNavBarItem(0, "Focus", Icons.hourglass_empty),
-          _buildNavBarItem(1, "Planner", Icons.calendar_today),
-          _buildNavBarItem(2, "Groups", Icons.people_outline),
-          _buildNavBarItem(3, "Blocks", Icons.block),
-        ],
-      ),
-    );
-  }
+  // Removed _buildCustomBottomNavBar and _buildNavBarItem
 
-  Widget _buildNavBarItem(int index, String label, IconData icon) {
-    final isSelected = _selectedTab == index;
-
-    if (isSelected) {
-      return Container(
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+  Widget _buildWarningBanner(String title, String subtitle, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          border: Border.all(color: Colors.green, width: 1),
-          borderRadius: BorderRadius.circular(24),
+          color: Colors.redAccent.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.redAccent.withOpacity(0.3)),
         ),
         child: Row(
-          mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 20, color: Colors.green),
-            const SizedBox(width: 8),
-            Text(
-              label,
-              style: const TextStyle(
-                color: Colors.green,
-                fontSize: 13,
-                fontWeight: FontWeight.bold,
-                fontFamily: 'monospace',
+            const Icon(Icons.warning_amber_rounded, color: Colors.redAccent, size: 20),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: Colors.redAccent,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                    ),
+                  ),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      color: Colors.redAccent.withOpacity(0.7),
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
               ),
             ),
-          ],
-        ),
-      );
-    }
-
-    return GestureDetector(
-      onTap: () => setState(() => _selectedTab = index),
-      behavior: HitTestBehavior.opaque,
-      child: Padding(
-        padding: const EdgeInsets.all(8.0),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 20, color: Colors.white38),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: const TextStyle(
-                color: Colors.white38,
-                fontSize: 10,
-                fontFamily: 'monospace',
-              ),
-            ),
+            const Icon(Icons.chevron_right, color: Colors.redAccent, size: 16),
           ],
         ),
       ),
     );
   }
 
-  void _showAccessibilityPermissionDialog() {
+  void _showPermissionAlert({
+    required String title,
+    required String description,
+    VoidCallback? onFix,
+  }) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: Colors.black,
         shape: Border.all(color: Colors.white24),
-        title: const Text(
-          "ACCESSIBILITY REQUIRED",
-          style: TextStyle(
+        title: Text(
+          title,
+          style: const TextStyle(
             color: Colors.white,
             fontFamily: 'monospace',
             fontSize: 15,
           ),
         ),
-        content: const Text(
-          "To block Reels and Shorts, the Accessibility Service must be enabled. This allows the app to detect when you are in a scrolling video feed.",
-          style: TextStyle(
+        content: Text(
+          description,
+          style: const TextStyle(
             color: Colors.white70,
             fontSize: 13,
             height: 1.5,
@@ -2407,22 +2067,32 @@ class _FocusTubeBlockerScreenState extends State<FocusTubeBlockerScreen> {
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text(
-              "NOT NOW",
+              "CANCEL",
               style: TextStyle(color: Colors.white30, fontFamily: 'monospace'),
             ),
           ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              context.read<LauncherState>().openAccessibilitySettings();
-            },
-            child: const Text(
-              "TURN ON",
-              style: TextStyle(color: Colors.green, fontFamily: 'monospace'),
+          if (onFix != null)
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                onFix();
+              },
+              child: const Text(
+                "FIX NOW",
+                style: TextStyle(color: Colors.green, fontFamily: 'monospace'),
+              ),
             ),
-          ),
         ],
       ),
+    );
+  }
+
+  void _showAccessibilityPermissionDialog() {
+    _showPermissionAlert(
+      title: "ACCESSIBILITY REQUIRED",
+      description:
+          "To block Reels and Shorts, the Accessibility Service must be enabled. This allows the app to detect when you are in a scrolling video feed.",
+      onFix: () => context.read<LauncherState>().openAccessibilitySettings(),
     );
   }
 }

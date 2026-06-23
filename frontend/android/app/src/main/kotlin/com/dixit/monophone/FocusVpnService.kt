@@ -72,19 +72,43 @@ class FocusVpnService : VpnService(), Runnable {
             val builder = Builder()
                 .setSession("FocusVpnContentFilter")
                 .addAddress("10.0.0.2", 32)
-                .addRoute("0.0.0.0", 0) // Route all IPv4 traffic
-                .addDnsServer("1.1.1.3") // Cloudflare Family DNS (blocks malware & adult sites)
-                .addDnsServer("1.0.0.3") // Cloudflare Family DNS secondary
-                .addDnsServer("185.228.168.168") // CleanBrowsing Family Filter (extra safety)
-                .setBlocking(true)
+                // Cloudflare Family DNS (blocks malware & adult sites)
+                .addDnsServer("1.1.1.3")
+                .addDnsServer("1.0.0.3")
+                // IPv6 CleanBrowsing/Cloudflare (essential for modern networks)
+                .addDnsServer("2606:4700:4700::1113")
+                .addDnsServer("2606:4700:4700::1003")
+                
+                // IMPORTANT: We REMOVED .addRoute("0.0.0.0", 0) 
+                // This was causing the internet to stop working on WiFi/Mobile.
+                // Instead, we add targeted routes for the DNS servers only.
+                .addRoute("1.1.1.3", 32)
+                .addRoute("1.0.0.3", 32)
+                
+                .setBlocking(false)
 
             vpnInterface = builder.establish()
 
-            // Keep the thread alive
+            if (vpnInterface == null) {
+                Log.e(TAG, "Failed to establish VPN interface")
+                return
+            }
+
+            val inputStream = java.io.FileInputStream(vpnInterface!!.fileDescriptor)
+            val buffer = ByteArray(32768)
+
+            // Keep the thread alive and drain the interface to prevent stalling
             while (isRunning) {
                 try {
-                    Thread.sleep(1000)
-                } catch (e: InterruptedException) {
+                    // We read packets that are routed here (primarily DNS queries to 1.1.1.3)
+                    // In a full implementation, we'd proxy these to a real DNS server.
+                    // For now, we drain the buffer to ensure the system doesn't kill the VPN.
+                    val length = inputStream.read(buffer)
+                    if (length <= 0) {
+                        Thread.sleep(100)
+                    }
+                } catch (e: Exception) {
+                    if (isRunning) Log.e(TAG, "Error reading from VPN interface: ${e.message}")
                     break
                 }
             }

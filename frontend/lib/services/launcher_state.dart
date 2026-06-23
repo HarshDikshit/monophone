@@ -111,6 +111,10 @@ class LauncherState extends ChangeNotifier {
   bool _isLoading = false;
   bool get isLoading => _isLoading;
 
+  bool get isParent => _userProfile?['role'] == 'parent';
+  List<dynamic> _linkedStudents = [];
+  List<dynamic> get linkedStudents => _linkedStudents;
+
   String? _lastLaunchedPackage;
   DateTime? _exitTime;
 
@@ -885,6 +889,10 @@ class LauncherState extends ChangeNotifier {
         _lastGoal = profile['targetGoal'];
         await OfflineSyncService.instance.cacheGoal(_lastGoal);
       }
+
+      if (isParent) {
+        await fetchLinkedStudents();
+      }
     } catch (e) {
       debugPrint("Error fetching user profile: $e");
       _userProfile = await OfflineSyncService.instance.getCachedProfile();
@@ -895,6 +903,16 @@ class LauncherState extends ChangeNotifier {
     } finally {
       _isLoading = false;
       notifyListeners();
+    }
+  }
+
+  Future<void> fetchLinkedStudents() async {
+    try {
+      final students = await ApiService.getLinkedStudents();
+      _linkedStudents = students;
+      notifyListeners();
+    } catch (e) {
+      debugPrint("Error fetching linked students: $e");
     }
   }
 
@@ -1764,6 +1782,30 @@ class LauncherState extends ChangeNotifier {
   void dismissBatteryPrompt() {
     _showBatteryPrompt = false;
     notifyListeners();
+  }
+
+  // ── Permissions ──
+
+  Future<bool> hasUsageAccessPermission() async {
+    try {
+      return await _channel.invokeMethod<bool>('hasUsageAccessPermission') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> requestUsageAccessPermission() async {
+    try {
+      await _channel.invokeMethod('requestUsageAccessPermission');
+    } catch (_) {}
+  }
+
+  Future<bool> hasWriteSecureSettingsPermission() async {
+    try {
+      return await _channel.invokeMethod<bool>('hasWriteSecureSettingsPermission') ?? false;
+    } catch (_) {
+      return false;
+    }
   }
 
   // ── Accessibility Service ──

@@ -6,7 +6,7 @@ import com.dixit.monophone.FocusAccessibilityService
 import com.dixit.monophone.EmergencyUseTimerService
 import com.dixit.monophone.DailyUsageMonitorService
 import com.dixit.monophone.BlockerOverlayService
-import com.dixit.monophone.GrayscaleOverlayService
+// Removed GrayscaleOverlayService import
 import com.dixit.monophone.db.UsageDatabase
 
 import android.app.AppOpsManager
@@ -285,7 +285,7 @@ class MainActivity : FlutterActivity() {
                     result.success(true)
                 }
                 "isGrayscaleOverlayActive" -> {
-                    result.success(GrayscaleOverlayService.isRunning)
+                    result.success(false) // Overlay service removed
                 }
 
                 // ════════════════════════════════════════════════════════════
@@ -333,6 +333,9 @@ class MainActivity : FlutterActivity() {
                 "requestIgnoreBatteryOptimizations" -> {
                     requestIgnoreBatteryOptimizations()
                     result.success(true)
+                }
+                "hasWriteSecureSettingsPermission" -> {
+                    result.success(hasWriteSecureSettingsPermission())
                 }
 
                 else -> {
@@ -690,19 +693,29 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun toggleGrayscaleOverlay(enabled: Boolean) {
-        if (enabled) {
-            val intent = Intent(this, GrayscaleOverlayService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(intent)
-            } else {
-                startService(intent)
+        try {
+            // Try to set the official Android Daltonizer (Color Correction) setting.
+            // This requires android.permission.WRITE_SECURE_SETTINGS, which must be
+            // granted once via ADB: adb shell pm grant com.dixit.monophone android.permission.WRITE_SECURE_SETTINGS
+            
+            val enabledVal = if (enabled) 1 else 0
+            val grayscaleVal = 0 // 0 is the constant for Grayscale mode
+            
+            val success = Settings.Secure.putInt(contentResolver, "accessibility_display_daltonizer_enabled", enabledVal)
+            Settings.Secure.putInt(contentResolver, "accessibility_display_daltonizer", if (enabled) grayscaleVal else -1)
+            
+            if (!success) {
+                Log.w("MainActivity", "Failed to set grayscale via Settings.Secure (Permission denied?)")
             }
-        } else {
-            val intent = Intent(this, GrayscaleOverlayService::class.java).apply {
-                action = GrayscaleOverlayService.ACTION_STOP
-            }
-            startService(intent)
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error toggling system grayscale: ${e.message}")
         }
+        
+        // Grayscale overlay cleanup removed (service deleted)
+    }
+
+    private fun hasWriteSecureSettingsPermission(): Boolean {
+        return checkCallingOrSelfPermission(android.Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED
     }
 
     private fun isBatteryOptimizationIgnored(): Boolean {

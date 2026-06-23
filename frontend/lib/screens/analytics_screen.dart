@@ -29,7 +29,10 @@ const _text = Color(0xFFAAAAAA);
 const _white = Color(0xFFFFFFFF);
 
 class AnalyticsScreen extends StatefulWidget {
-  const AnalyticsScreen({super.key});
+  final String? studentId;
+  final String? studentName;
+
+  const AnalyticsScreen({super.key, this.studentId, this.studentName});
 
   @override
   State<AnalyticsScreen> createState() => _AnalyticsScreenState();
@@ -78,7 +81,10 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   /// Silent refresh — no loading spinner, keeps current offset.
   Future<void> _silentRefresh() async {
     try {
-      final data = await ApiService.getAnalytics(daysBack: 30);
+      final data = await ApiService.getAnalytics(
+        daysBack: 30,
+        studentId: widget.studentId,
+      );
       if (!mounted) return;
       setState(() {
         _analytics = data;
@@ -144,9 +150,15 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     });
     try {
       final state = context.read<LauncherState>();
-      await state.syncStats();
+      // Only sync self stats if we are NOT viewing someone else's analytics
+      if (widget.studentId == null) {
+        await state.syncStats();
+      }
       
-      final data = await ApiService.getAnalytics(daysBack: 30);
+      final data = await ApiService.getAnalytics(
+        daysBack: 30,
+        studentId: widget.studentId,
+      );
       if (!mounted) return;
       setState(() {
         _analytics = data;
@@ -261,9 +273,9 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       appBar: AppBar(
         backgroundColor: _bg,
         elevation: 0,
-        title: const Text(
-          'ANALYTICS',
-          style: TextStyle(
+        title: Text(
+          widget.studentId != null ? "CHILD'S ANALYTICS" : 'ANALYTICS',
+          style: const TextStyle(
             color: _white,
             fontFamily: 'monospace',
             letterSpacing: 3,
@@ -308,8 +320,9 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                       child: Column(
                         children: [
                           _ProfileHeader(
-                            name: (user['name'] ?? 'focus-hero').toString(),
+                            name: widget.studentName ?? (user['name'] ?? 'focus-hero').toString(),
                             rangeLabel: window.title,
+                            isChild: widget.studentId != null,
                           ),
                           const SizedBox(height: 20),
                           _RangeToggle(
@@ -663,12 +676,30 @@ class _NavBar extends StatelessWidget {
 // ── Profile Header ──────────────────────────────────────────────────
 class _ProfileHeader extends StatelessWidget {
   final String name, rangeLabel;
-  const _ProfileHeader({required this.name, required this.rangeLabel});
+  final bool isChild;
+  const _ProfileHeader({
+    required this.name,
+    required this.rangeLabel,
+    this.isChild = false,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
+        if (isChild) ...[
+          const Text(
+            "CHILD'S ACTIVITY",
+            style: TextStyle(
+              color: _dim,
+              fontSize: 10,
+              fontFamily: 'monospace',
+              letterSpacing: 2,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
         const SizedBox(height: 4),
         Container(
           width: 72,

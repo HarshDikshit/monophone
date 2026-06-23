@@ -419,6 +419,20 @@ router.post("/parent/pair", authenticateToken, async (req, res) => {
   }
 });
 
+// Get Linked Students (Parent Endpoint)
+router.get("/parent/students", authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== "parent") {
+      return res.status(403).json({ message: "Only parents can view linked students" });
+    }
+    const students = await User.find({ linkedParentId: req.user.id })
+      .select("name email currentStatus targetGoal globalScore dailyStudySeconds weeklyStudySeconds totalStudySeconds");
+    res.json(students);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 // Get Parent Reports for Student
 router.get(
   "/parent/reports/:studentId",
@@ -645,14 +659,37 @@ router.post("/activity/batch-sync", authenticateToken, async (req, res) => {
 router.get("/analytics", authenticateToken, async (req, res) => {
   try {
     const daysBack = parseInt(req.query.days) || 30;
-    const cacheKey = `analytics:${req.user.id}:${daysBack}`;
+    const { studentId } = req.query;
+    
+    // Determine the subject of analytics. Default is the current user.
+    let targetUserId = req.user.id;
+    
+    if (studentId) {
+      const student = await User.findById(studentId);
+      if (!student) {
+        return res.status(404).json({ message: "Student not found" });
+      }
+      
+      // Authorization check: Parent must be linked, or student viewing themselves
+      const isAuthorized = 
+        req.user.id === studentId || 
+        (req.user.role === "parent" && student.linkedParentId && student.linkedParentId.toString() === req.user.id);
+        
+      if (!isAuthorized) {
+        return res.status(403).json({ message: "Unauthorized to view this student's analytics" });
+      }
+      
+      targetUserId = studentId;
+    }
+
+    const cacheKey = `analytics:${targetUserId}:${daysBack}`;
 
     const cached = await getCached(cacheKey);
     if (cached) {
       return res.json({ ...cached, _fromCache: true });
     }
 
-    const user = await User.findById(req.user.id)
+    const user = await User.findById(targetUserId)
       .select("-password")
       .populate("groupId", "groupName category memberCount creatorId");
     if (!user) {
@@ -869,6 +906,40 @@ router.get("/buddies/status", authenticateToken, async (req, res) => {
     if (!user) return res.status(404).json({ message: "User not found" });
 
     res.json(user.buddies);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// ----------------------------------------------------
+// PUBLIC ACCOUNTABILITY RANKINGS
+// ----------------------------------------------------
+
+// Get Rankings
+router.get("/rankings", authenticateToken, async (req, res) => {
+  try {
+    const { category, skip, limit } = req.query;
+    const skipNum = parseInt(skip) || 0;
+    const limitNum = parseInt(limit) || 20;
+
+    let sortField = "totalStudySeconds";
+    if (category === "thisweek") {
+      sortField = "weeklyStudySeconds";
+    }
+
+    // Return students only for the leaderboard
+    const rankingData = await User.find({ role: "student" })
+      .select("name email weeklyStudySeconds totalStudySeconds")
+      .sort({ [sortField]: -1 })
+      .skip(skipNum)
+      .limit(limitNum);
+
+    const rankings = rankingData.map((user) => ({
+      username: user.name,
+      totalFocusSeconds: user[sortField] || 0,
+    }));
+
+    res.json({ rankings });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
