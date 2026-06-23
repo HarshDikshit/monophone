@@ -6,7 +6,7 @@ import com.dixit.monophone.FocusAccessibilityService
 import com.dixit.monophone.EmergencyUseTimerService
 import com.dixit.monophone.DailyUsageMonitorService
 import com.dixit.monophone.BlockerOverlayService
-import com.dixit.monophone.GrayscaleOverlayService
+// Removed GrayscaleOverlayService import
 import com.dixit.monophone.db.UsageDatabase
 
 import android.app.AppOpsManager
@@ -191,16 +191,19 @@ class MainActivity : FlutterActivity() {
                         ?: emptySet()
                     val dailyLimits = call.argument<HashMap<String, Int>>("dailyLimits")
                         ?: hashMapOf()
-                    val blockFirstShort = call.argument<Boolean>("blockFirstShort") ?: true
+                    val allowOneShort = call.argument<HashMap<String, Boolean>>("allowOneShort")
+                        ?: hashMapOf()
                     val restrictedKeywords = call.argument<List<String>>("restrictedKeywords")
                         ?.toSet() ?: emptySet()
                     val emergencyUseMaxCounts = call.argument<HashMap<String, Int>>("emergencyUseMaxCounts")
                         ?: hashMapOf()
 
+                    Log.d("MainActivity", "configureBlockingRules: packages=${blockedPackages.size}, limits=${dailyLimits.size}, allowOne=${allowOneShort.size}")
+
                     BlockerConfig.updateFromFlutter(
                         blockedPackages = blockedPackages,
                         dailyLimits = dailyLimits,
-                        blockFirstShort = blockFirstShort,
+                        allowOneShort = allowOneShort,
                         restrictedKeywords = restrictedKeywords,
                         emergencyUseMaxCounts = emergencyUseMaxCounts
                     )
@@ -282,7 +285,7 @@ class MainActivity : FlutterActivity() {
                     result.success(true)
                 }
                 "isGrayscaleOverlayActive" -> {
-                    result.success(GrayscaleOverlayService.isRunning)
+                    result.success(false) // Overlay service removed
                 }
 
                 // ════════════════════════════════════════════════════════════
@@ -322,6 +325,17 @@ class MainActivity : FlutterActivity() {
                 "stopWidgetHost" -> {
                     widgetHostManager?.stopListening()
                     result.success(true)
+                }
+
+                "isBatteryOptimizationIgnored" -> {
+                    result.success(isBatteryOptimizationIgnored())
+                }
+                "requestIgnoreBatteryOptimizations" -> {
+                    requestIgnoreBatteryOptimizations()
+                    result.success(true)
+                }
+                "hasWriteSecureSettingsPermission" -> {
+                    result.success(hasWriteSecureSettingsPermission())
                 }
 
                 else -> {
@@ -678,26 +692,55 @@ class MainActivity : FlutterActivity() {
         startActivity(intent)
     }
 
-    /**
-     * Start or stop [GrayscaleOverlayService].
-     *
-     * This replaces the previous Settings.Secure approach which required
-     * WRITE_SECURE_SETTINGS (a signature/privileged permission — unavailable
-     * to normal apps).  The overlay approach works with just SYSTEM_ALERT_WINDOW.
-     */
     private fun toggleGrayscaleOverlay(enabled: Boolean) {
-        if (enabled) {
-            val intent = Intent(this, GrayscaleOverlayService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(intent)
-            } else {
-                startService(intent)
+        try {
+            // Try to set the official Android Daltonizer (Color Correction) setting.
+            // This requires android.permission.WRITE_SECURE_SETTINGS, which must be
+            // granted once via ADB: adb shell pm grant com.dixit.monophone android.permission.WRITE_SECURE_SETTINGS
+            
+            val enabledVal = if (enabled) 1 else 0
+            val grayscaleVal = 0 // 0 is the constant for Grayscale mode
+            
+            val success = Settings.Secure.putInt(contentResolver, "accessibility_display_daltonizer_enabled", enabledVal)
+            Settings.Secure.putInt(contentResolver, "accessibility_display_daltonizer", if (enabled) grayscaleVal else -1)
+            
+            if (!success) {
+                Log.w("MainActivity", "Failed to set grayscale via Settings.Secure (Permission denied?)")
             }
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error toggling system grayscale: ${e.message}")
+        }
+        
+        // Grayscale overlay cleanup removed (service deleted)
+    }
+
+    private fun hasWriteSecureSettingsPermission(): Boolean {
+        return checkCallingOrSelfPermission(android.Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun isBatteryOptimizationIgnored(): Boolean {
+        val powerManager = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            powerManager.isIgnoringBatteryOptimizations(packageName)
         } else {
-            val intent = Intent(this, GrayscaleOverlayService::class.java).apply {
-                action = GrayscaleOverlayService.ACTION_STOP
+            true
+        }
+    }
+
+    private fun requestIgnoreBatteryOptimizations() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                data = Uri.parse("package:$packageName")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
-            startService(intent)
+            try {
+                startActivity(intent)
+            } catch (e: Exception) {
+                val fallbackIntent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                startActivity(fallbackIntent)
+            }
         }
     }
 }

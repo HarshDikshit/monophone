@@ -11,7 +11,10 @@ class BlockerService extends ChangeNotifier {
 
   // --- State ---
   bool _isStrictMode = false;
-  bool _blockReelsShorts = false;
+  bool _blockYoutubeShorts = false;
+  bool _blockInstagramReels = false;
+  bool _allowOneYoutubeShort = false;
+  bool _allowOneInstagramReel = false;
   String _unlockOption = 'text';
   DateTime? _lockUntilDate;
   String _randomChallengeText = '';
@@ -33,7 +36,10 @@ class BlockerService extends ChangeNotifier {
   List<String> _unproductiveAppNames = [];
 
   bool get isStrictMode => _isStrictMode;
-  bool get blockReelsShorts => _blockReelsShorts;
+  bool get blockYoutubeShorts => _blockYoutubeShorts;
+  bool get blockInstagramReels => _blockInstagramReels;
+  bool get allowOneYoutubeShort => _allowOneYoutubeShort;
+  bool get allowOneInstagramReel => _allowOneInstagramReel;
   String get unlockOption => _unlockOption;
   DateTime? get lockUntilDate => _lockUntilDate;
   String get randomChallengeText => _randomChallengeText;
@@ -71,7 +77,10 @@ class BlockerService extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
 
     _isStrictMode = prefs.getBool('focustube_strict_mode') ?? false;
-    _blockReelsShorts = prefs.getBool('focustube_block_reels_shorts') ?? false;
+    _blockYoutubeShorts = prefs.getBool('focustube_block_yt_shorts') ?? false;
+    _blockInstagramReels = prefs.getBool('focustube_block_ig_reels') ?? false;
+    _allowOneYoutubeShort = prefs.getBool('focustube_allow_one_yt') ?? false;
+    _allowOneInstagramReel = prefs.getBool('focustube_allow_one_ig') ?? false;
     _unlockOption = prefs.getString('focustube_unlock_option') ?? 'text';
 
     final lockUntilStr = prefs.getString('focustube_lock_until') ?? '';
@@ -146,14 +155,18 @@ class BlockerService extends ChangeNotifier {
   }
 
   bool isReelsBlockedByName(String appName) {
-    if (!_loaded || !_blockReelsShorts) return false;
+    if (!_loaded) return false;
     final n = appName.toLowerCase().trim();
-    return n.contains('reels') ||
-        n.contains('shorts') ||
-        n.contains('instagram') ||
-        n.contains('youtube') ||
-        n.contains('tiktok') ||
-        n.contains('facebook');
+    if (n.contains('youtube') && _blockYoutubeShorts) return true;
+    if (n.contains('instagram') && _blockInstagramReels) return true;
+    
+    // Legacy/fallback block for generic terms if any reel block is on
+    if (_blockYoutubeShorts || _blockInstagramReels) {
+      if (n.contains('reels') || n.contains('shorts') || n.contains('tiktok') || n.contains('facebook')) {
+        return true;
+      }
+    }
+    return false;
   }
 
   bool isChannelBlocked(String channelName) {
@@ -169,7 +182,10 @@ class BlockerService extends ChangeNotifier {
 
   Future<void> saveSettings({
     required bool isStrictMode,
-    required bool blockReelsShorts,
+    required bool blockYoutubeShorts,
+    required bool blockInstagramReels,
+    required bool allowOneYoutubeShort,
+    required bool allowOneInstagramReel,
     required String unlockOption,
     DateTime? lockUntilDate,
     required bool vpnContentFilterEnabled,
@@ -184,7 +200,10 @@ class BlockerService extends ChangeNotifier {
   }) async {
     final prefs = await SharedPreferences.getInstance();
     _isStrictMode = isStrictMode;
-    _blockReelsShorts = blockReelsShorts;
+    _blockYoutubeShorts = blockYoutubeShorts;
+    _blockInstagramReels = blockInstagramReels;
+    _allowOneYoutubeShort = allowOneYoutubeShort;
+    _allowOneInstagramReel = allowOneInstagramReel;
     _unlockOption = unlockOption;
     _lockUntilDate = lockUntilDate;
     _vpnContentFilterEnabled = vpnContentFilterEnabled;
@@ -198,7 +217,10 @@ class BlockerService extends ChangeNotifier {
     _channels = channels;
 
     await prefs.setBool('focustube_strict_mode', _isStrictMode);
-    await prefs.setBool('focustube_block_reels_shorts', _blockReelsShorts);
+    await prefs.setBool('focustube_block_yt_shorts', _blockYoutubeShorts);
+    await prefs.setBool('focustube_block_ig_reels', _blockInstagramReels);
+    await prefs.setBool('focustube_allow_one_yt', _allowOneYoutubeShort);
+    await prefs.setBool('focustube_allow_one_ig', _allowOneInstagramReel);
     await prefs.setString('focustube_unlock_option', _unlockOption);
     await prefs.setString(
       'focustube_lock_until',

@@ -9,6 +9,7 @@
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.BIND_APPWIDGET" />
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" tools:ignore="ProtectedPermissions" />
 
 
     <application
@@ -102,14 +103,7 @@
             <property android:name="android.app.PROPERTY_SPECIAL_USE_CATEGORY" android:value="Full-screen blocking overlay to enforce focus and distraction rules."/>
         </service>
 
-        <!-- System-wide Grayscale Overlay Service (uses SYSTEM_ALERT_WINDOW to desaturate all apps) -->
-        <service
-            android:name=".GrayscaleOverlayService"
-            android:enabled="true"
-            android:exported="false"
-            android:foregroundServiceType="specialUse">
-            <property android:name="android.app.PROPERTY_SPECIAL_USE_CATEGORY" android:value="Full-screen grayscale overlay for monochrome mode across all apps."/>
-        </service>
+        <!-- GrayscaleOverlayService was removed in favor of system-wide Daltonizer -->
 
         <!-- Focus VPN Service (Adult Content Shield) -->
         <service

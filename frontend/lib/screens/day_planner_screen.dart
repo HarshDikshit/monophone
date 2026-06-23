@@ -855,6 +855,7 @@ class _TaskBlockState extends State<_TaskBlock> {
               duration: const Duration(milliseconds: 200),
               transform: Matrix4.translationValues(_dragOffset, 0, 0),
               padding: const EdgeInsets.all(6),
+              height: double.infinity,
               decoration: BoxDecoration(
                 color: widget.task.isCompleted
                     ? Colors.green.withOpacity(0.08)
@@ -877,7 +878,7 @@ class _TaskBlockState extends State<_TaskBlock> {
 
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
+                    mainAxisSize: MainAxisSize.max,
                     children: [
                       Row(
                         children: [

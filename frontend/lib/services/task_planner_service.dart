@@ -62,6 +62,7 @@ class TimeBlockTask {
   bool isAlarmEnabled;
   int focusSeconds;
   int completedPomodoros;
+  DateTime? completedAt;
 
   DateTime get endTime => startTime.add(Duration(minutes: durationMinutes));
   String get timeSlotString =>
@@ -82,6 +83,7 @@ class TimeBlockTask {
     this.isAlarmEnabled = true,
     this.focusSeconds = 0,
     this.completedPomodoros = 0,
+    this.completedAt,
   });
 
   Map<String, dynamic> toJson() => {
@@ -98,6 +100,7 @@ class TimeBlockTask {
     'isAlarmEnabled': isAlarmEnabled,
     'focusSeconds': focusSeconds,
     'completedPomodoros': completedPomodoros,
+    'completedAt': completedAt?.toIso8601String(),
   };
 
   factory TimeBlockTask.fromJson(Map<String, dynamic> json) => TimeBlockTask(
@@ -117,6 +120,9 @@ class TimeBlockTask {
     isAlarmEnabled: json['isAlarmEnabled'] as bool? ?? true,
     focusSeconds: json['focusSeconds'] as int? ?? 0,
     completedPomodoros: json['completedPomodoros'] as int? ?? 0,
+    completedAt: json['completedAt'] != null
+        ? DateTime.parse(json['completedAt'] as String)
+        : null,
   );
 
   TimeBlockTask copyWith({
@@ -147,6 +153,7 @@ class TimeBlockTask {
     isAlarmEnabled: isAlarmEnabled ?? this.isAlarmEnabled,
     focusSeconds: focusSeconds ?? this.focusSeconds,
     completedPomodoros: completedPomodoros ?? this.completedPomodoros,
+    completedAt: completedAt ?? this.completedAt,
   );
 }
 
@@ -281,7 +288,9 @@ class TaskPlannerService extends ChangeNotifier {
   Future<void> toggleComplete(String id) async {
     final idx = _tasks.indexWhere((t) => t.id == id);
     if (idx >= 0) {
-      _tasks[idx].isCompleted = !_tasks[idx].isCompleted;
+      final isDone = !_tasks[idx].isCompleted;
+      _tasks[idx].isCompleted = isDone;
+      _tasks[idx].completedAt = isDone ? DateTime.now() : null;
       await _persist();
       notifyListeners();
     }

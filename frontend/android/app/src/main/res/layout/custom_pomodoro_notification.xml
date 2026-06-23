@@ -1,91 +1,76 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="72dp"
+    android:layout_height="64dp"
     android:orientation="horizontal"
     android:gravity="center_vertical"
     android:paddingLeft="12dp"
     android:paddingRight="12dp"
     android:background="#1A1A2E">
 
-    <!-- App Logo Badge -->
+    <!-- App Logo Badge - Hidden to give more space to middle content -->
     <ImageView
         android:id="@+id/app_logo"
-        android:layout_width="40dp"
-        android:layout_height="40dp"
-        android:src="@drawable/notification_logo"
-        android:scaleType="fitCenter"
-        android:adjustViewBounds="true"
-        android:layout_marginRight="12dp"
-        android:contentDescription="App Logo" />
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:visibility="gone" />
 
-    <!-- Text fields and controls -->
-    <LinearLayout
+    <!-- Timer text: centered or left-aligned next to logo -->
+    <TextView
+        android:id="@+id/timer_text"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_weight="1"
-        android:orientation="vertical">
+        android:text="25:00"
+        android:textColor="#FF5722"
+        android:textSize="32sp"
+        android:textStyle="bold"
+        android:fontFamily="monospace"
+        android:includeFontPadding="false"
+        android:gravity="center_vertical" />
 
-        <!-- Header row: task title + play/pause + stop -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical">
+    <!-- Spacer removed since weight handles it -->
 
-            <TextView
-                android:id="@+id/task_title"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="FOCUS SESSION"
-                android:textColor="#9E9E9E"
-                android:textSize="10sp"
-                android:singleLine="true"
-                android:ellipsize="end"
-                android:fontFamily="monospace"
-                android:textStyle="bold"
-                android:letterSpacing="0.08" />
+    <!-- Controls Row -->
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
 
-            <!-- Play/Pause Button -->
-            <ImageView
-                android:id="@+id/btn_play_pause"
-                android:layout_width="32dp"
-                android:layout_height="32dp"
-                android:background="@drawable/circle_orange"
-                android:src="@android:drawable/ic_media_play"
-                android:tint="#FFFFFF"
-                android:padding="7dp"
-                android:layout_marginRight="6dp"
-                android:clickable="true"
-                android:focusable="true"
-                android:contentDescription="Play or Pause" />
+        <!-- Play/Pause Button - Increased size to 40dp -->
+        <ImageView
+            android:id="@+id/btn_play_pause"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="@drawable/circle_orange"
+            android:src="@android:drawable/ic_media_play"
+            android:tint="#FFFFFF"
+            android:padding="8dp"
+            android:layout_marginRight="12dp"
+            android:clickable="true"
+            android:focusable="true"
+            android:contentDescription="Play or Pause" />
 
-            <!-- Stop Button -->
-            <ImageView
-                android:id="@+id/btn_stop"
-                android:layout_width="32dp"
-                android:layout_height="32dp"
-                android:src="@android:drawable/ic_menu_close_clear_cancel"
-                android:tint="#666680"
-                android:padding="7dp"
-                android:clickable="true"
-                android:focusable="true"
-                android:contentDescription="Stop Focus" />
-        </LinearLayout>
-
-        <!-- Timer text -->
-        <TextView
-            android:id="@+id/timer_text"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="25:00"
-            android:textColor="#FF5722"
-            android:textSize="28sp"
-            android:textStyle="bold"
-            android:fontFamily="monospace"
-            android:includeFontPadding="false"
-            android:layout_marginTop="-2dp" />
+        <!-- Stop Button - Increased size to 40dp -->
+        <ImageView
+            android:id="@+id/btn_stop"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="@drawable/circle_dark"
+            android:src="@android:drawable/ic_menu_close_clear_cancel"
+            android:tint="#FFFFFF"
+            android:padding="10dp"
+            android:clickable="true"
+            android:focusable="true"
+            android:contentDescription="Stop Focus" />
     </LinearLayout>
+
+    <!-- Invisible Task Title to maintain ID compatibility without appearing in UI -->
+    <TextView
+        android:id="@+id/task_title"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:visibility="gone" />
 
 </LinearLayout>
