@@ -154,7 +154,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       if (widget.studentId == null) {
         await state.syncStats();
       }
-      
+
       final data = await ApiService.getAnalytics(
         daysBack: 30,
         studentId: widget.studentId,
@@ -171,6 +171,32 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         _loading = false;
       });
     }
+  }
+
+  /// Calculate study seconds accurately from sessions and task analytics.
+  /// This ignores the potentially inflated backend studySeconds field and
+  /// reconstructs the actual focus time from per-tick committed data.
+  int _calcStudyFromDay(Map<String, dynamic> day, LauncherState state) {
+    final dateStr = day['date'] as String? ?? '';
+    final todayKey =
+        '${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}-${DateTime.now().day.toString().padLeft(2, '0')}';
+
+    // For today, use local task focusSeconds (accurate per-tick count)
+    if (dateStr == todayKey) {
+      int taskFocusSum = 0;
+      for (final t in state.planner?.tasks ?? []) {
+        taskFocusSum += (t.focusSeconds as num).toInt();
+      }
+      return taskFocusSum;
+    }
+
+    // For past days, sum up sessions' actualSeconds (committed per-tick data)
+    int sessionSum = 0;
+    final sessions = day['sessions'] as List? ?? [];
+    for (final s in sessions) {
+      sessionSum += (s['actualSeconds'] as num? ?? 0).toInt();
+    }
+    return sessionSum;
   }
 
   _DateWindow _resolveWindow(_RangeMode mode, LauncherState state) {
@@ -191,30 +217,51 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         },
       );
 
+      int studySec = _calcStudyFromDay(match.cast<String, dynamic>(), state);
       final todayKey =
           '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
-      int studySec = (match['studySeconds'] as num? ?? 0).toInt();
+
       List sessions = List.from(match['sessions'] as List? ?? []);
       List taskAnalytics = List.from(match['taskAnalytics'] as List? ?? []);
 
       if (key == todayKey) {
-        studySec = state.studySeconds;
+        // Overlay local planner data onto backend data for realtime accuracy
+        final localTasks = state.planner?.tasks ?? [];
+        taskAnalytics = localTasks
+            .where((t) => t.focusSeconds > 0)
+            .map((t) => {
+                  'taskId': t.id,
+                  'title': t.title,
+                  'seconds': t.focusSeconds,
+                  'tag': t.tag.name.toUpperCase(),
+                })
+            .toList();
       }
 
       return _DateWindow(
         title: key == todayKey ? 'TODAY' : key,
         totalStudySeconds: studySec,
-        totalDistractedSeconds: (match['distractedSeconds'] as num? ?? 0).toInt(),
+        totalDistractedSeconds: (match['distractedSeconds'] as num? ?? 0)
+            .toInt(),
         days: [match.cast<String, dynamic>()],
         sessions: List<Map<String, dynamic>>.from(sessions),
         taskAnalytics: List<Map<String, dynamic>>.from(taskAnalytics),
       );
     } else if (_mode == _RangeMode.week) {
-      final monday = _windowDate.subtract(Duration(days: _windowDate.weekday - 1));
+      final monday = _windowDate.subtract(
+        Duration(days: _windowDate.weekday - 1),
+      );
       final sunday = monday.add(const Duration(days: 6));
-      
+
       final startDate = DateTime(monday.year, monday.month, monday.day);
-      final endDate = DateTime(sunday.year, sunday.month, sunday.day, 23, 59, 59);
+      final endDate = DateTime(
+        sunday.year,
+        sunday.month,
+        sunday.day,
+        23,
+        59,
+        59,
+      );
 
       final weekDays = daily.where((d) {
         final dDate = DateTime.tryParse(d['date'] as String ?? '');
@@ -223,16 +270,25 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             dDate.isBefore(endDate.add(const Duration(seconds: 1)));
       }).toList();
 
-      final totalStudy = weekDays.fold(0, (a, b) => a + (b['studySeconds'] as num? ?? 0).toInt());
-      final totalDistracted = weekDays.fold(0, (a, b) => a + (b['distractedSeconds'] as num? ?? 0).toInt());
+      // Calculate from sessions (accurate per-tick data) instead of studySeconds
+      int totalStudy = 0;
+      for (final d in weekDays) {
+        totalStudy += _calcStudyFromDay(d.cast<String, dynamic>(), state);
+      }
 
       return _DateWindow(
         title: '${_fmtDate(startDate)} - ${_fmtDate(endDate)}',
         totalStudySeconds: totalStudy,
-        totalDistractedSeconds: totalDistracted,
+        totalDistractedSeconds: 0,
         days: weekDays.cast<Map<String, dynamic>>(),
-        sessions: weekDays.expand((d) => (d['sessions'] as List? ?? [])).cast<Map<String, dynamic>>().toList(),
-        taskAnalytics: weekDays.expand((d) => (d['taskAnalytics'] as List? ?? [])).cast<Map<String, dynamic>>().toList(),
+        sessions: weekDays
+            .expand((d) => (d['sessions'] as List? ?? []))
+            .cast<Map<String, dynamic>>()
+            .toList(),
+        taskAnalytics: weekDays
+            .expand((d) => (d['taskAnalytics'] as List? ?? []))
+            .cast<Map<String, dynamic>>()
+            .toList(),
       );
     } else {
       final startOfMonth = DateTime(_windowDate.year, _windowDate.month, 1);
@@ -245,22 +301,44 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             dDate.isBefore(nextMonth);
       }).toList();
 
-      final totalStudy = monthDays.fold(0, (a, b) => a + (b['studySeconds'] as num? ?? 0).toInt());
-      final totalDistracted = monthDays.fold(0, (a, b) => a + (b['distractedSeconds'] as num? ?? 0).toInt());
+      // Calculate from sessions (accurate per-tick data) instead of studySeconds
+      int totalStudy = 0;
+      for (final d in monthDays) {
+        totalStudy += _calcStudyFromDay(d.cast<String, dynamic>(), state);
+      }
 
       return _DateWindow(
         title: '${_monthTitle(startOfMonth.month)} ${startOfMonth.year}',
         totalStudySeconds: totalStudy,
-        totalDistractedSeconds: totalDistracted,
+        totalDistractedSeconds: 0,
         days: monthDays.cast<Map<String, dynamic>>(),
-        sessions: monthDays.expand((d) => (d['sessions'] as List? ?? [])).cast<Map<String, dynamic>>().toList(),
-        taskAnalytics: monthDays.expand((d) => (d['taskAnalytics'] as List? ?? [])).cast<Map<String, dynamic>>().toList(),
+        sessions: monthDays
+            .expand((d) => (d['sessions'] as List? ?? []))
+            .cast<Map<String, dynamic>>()
+            .toList(),
+        taskAnalytics: monthDays
+            .expand((d) => (d['taskAnalytics'] as List? ?? []))
+            .cast<Map<String, dynamic>>()
+            .toList(),
       );
     }
   }
 
   String _fmtDate(DateTime d) => '${d.month}/${d.day}';
-  String _monthTitle(int m) => ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m-1];
+  String _monthTitle(int m) => [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ][m - 1];
 
   @override
   Widget build(BuildContext context) {
@@ -320,7 +398,9 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                       child: Column(
                         children: [
                           _ProfileHeader(
-                            name: widget.studentName ?? (user['name'] ?? 'focus-hero').toString(),
+                            name:
+                                widget.studentName ??
+                                (user['name'] ?? 'focus-hero').toString(),
                             rangeLabel: window.title,
                             isChild: widget.studentId != null,
                           ),
@@ -337,7 +417,10 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                             onBack: _goPrev,
                             onForward: _goNext,
                             canBack: true,
-                            canForward: !_isSameDay(_windowDate, DateTime.now()),
+                            canForward: !_isSameDay(
+                              _windowDate,
+                              DateTime.now(),
+                            ),
                           ),
                           const SizedBox(height: 16),
                           if (state.showBatteryPrompt) ...[
@@ -378,17 +461,20 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
 
   (int, int) _taskCounts(LauncherState state, _DateWindow window) {
     if (window.days.isEmpty) return (0, 0);
-    
+
     // Find the date range from the window days
     final firstDayStr = window.days.first['date'] as String;
     final lastDayStr = window.days.last['date'] as String;
     final start = DateTime.parse(firstDayStr);
-    final end = DateTime.parse(lastDayStr).add(const Duration(hours: 23, minutes: 59, seconds: 59));
+    final end = DateTime.parse(
+      lastDayStr,
+    ).add(const Duration(hours: 23, minutes: 59, seconds: 59));
 
     int completed = 0;
     int nonCompleted = 0;
-    
-    for (final t in state.planner?.tasks ?? []) {
+
+    final tasks = state.planner?.tasks ?? [];
+    for (final t in tasks) {
       if (t.isCompleted && t.completedAt != null) {
         if (!t.completedAt!.isBefore(start) && !t.completedAt!.isAfter(end)) {
           completed++;
@@ -492,36 +578,51 @@ class _SummaryStats extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: stats
-            .map((s) => _StatItem(
-                  label: s.label,
-                  value: s.value,
-                  subValue: s.subValue,
-                ))
+            .map(
+              (s) => _StatItem(
+                label: s.label,
+                value: s.value,
+                subValue: s.subValue,
+              ),
+            )
             .toList(),
       ),
     );
   }
 
   List<_StatData> _getStats(LauncherState state, _DateWindow window) {
-    if (window.days.isEmpty) return [
-      _StatData(label: 'Focus Time', value: '0h', subValue: '0m'),
-      _StatData(label: 'Tasks Done', value: '0', subValue: 'completed'),
-    ];
+    if (window.days.isEmpty)
+      return [
+        _StatData(label: 'Focus Time', value: '0h', subValue: '0m'),
+        _StatData(label: 'Tasks Done', value: '0', subValue: 'completed'),
+      ];
 
     final firstDayStr = window.days.first['date'] as String;
     final lastDayStr = window.days.last['date'] as String;
-    
+
     final firstDay = DateTime.parse(firstDayStr);
     final lastDay = DateTime.parse(lastDayStr);
-    
+
     final windowStart = DateTime(firstDay.year, firstDay.month, firstDay.day);
-    final windowEnd = DateTime(lastDay.year, lastDay.month, lastDay.day, 23, 59, 59);
+    final windowEnd = DateTime(
+      lastDay.year,
+      lastDay.month,
+      lastDay.day,
+      23,
+      59,
+      59,
+    );
 
     int completedCount = 0;
-    for (final t in state.planner?.tasks ?? []) {
+    final tasks = state.planner?.tasks ?? [];
+    for (final t in tasks) {
       if (t.isCompleted && t.completedAt != null) {
-        if (t.completedAt!.isAfter(windowStart.subtract(const Duration(seconds: 1))) &&
-            t.completedAt!.isBefore(windowEnd.add(const Duration(seconds: 1)))) {
+        if (t.completedAt!.isAfter(
+              windowStart.subtract(const Duration(seconds: 1)),
+            ) &&
+            t.completedAt!.isBefore(
+              windowEnd.add(const Duration(seconds: 1)),
+            )) {
           completedCount++;
         }
       }
@@ -532,11 +633,7 @@ class _SummaryStats extends StatelessWidget {
     final m = (s % 3600) ~/ 60;
 
     return [
-      _StatData(
-        label: 'Focus Time',
-        value: '${h}h',
-        subValue: '${m}m',
-      ),
+      _StatData(label: 'Focus Time', value: '${h}h', subValue: '${m}m'),
       _StatData(
         label: 'Tasks Done',
         value: '$completedCount',
@@ -553,7 +650,11 @@ class _StatData {
 
 class _StatItem extends StatelessWidget {
   final String label, value, subValue;
-  const _StatItem({required this.label, required this.value, required this.subValue});
+  const _StatItem({
+    required this.label,
+    required this.value,
+    required this.subValue,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -609,7 +710,7 @@ class _DateWindow {
   final List<Map<String, dynamic>> days;
   final List<Map<String, dynamic>> sessions;
   final List<Map<String, dynamic>> taskAnalytics;
-  
+
   const _DateWindow({
     this.title = '',
     this.totalStudySeconds = 0,
@@ -631,8 +732,9 @@ String _fmtHM(int s) {
 String _fmtHMD(int s) {
   if (s <= 0) return '0';
   final h = s / 3600.0;
+  if (h >= 10) return h.toStringAsFixed(0);
   if (h >= 1) return h.toStringAsFixed(1).replaceAll(RegExp(r'\.0$'), '');
-  return ((s / 3600.0) * 10).round().toString();
+  return h.toStringAsFixed(1);
 }
 
 // ── Navigation Bar ──────────────────────────────────────────────────
@@ -997,7 +1099,14 @@ class _TimelineHeader extends StatelessWidget {
     children: [
       Text(icon, style: TextStyle(color: color, fontSize: 12)),
       const SizedBox(width: 4),
-      Text(label, style: const TextStyle(color: _dim, fontSize: 9, fontFamily: 'monospace')),
+      Text(
+        label,
+        style: const TextStyle(
+          color: _dim,
+          fontSize: 9,
+          fontFamily: 'monospace',
+        ),
+      ),
     ],
   );
 }
@@ -1015,9 +1124,7 @@ class _SessionTimeline extends StatelessWidget {
         color: const Color(0xFF111111),
         borderRadius: BorderRadius.circular(4),
       ),
-      child: CustomPaint(
-        painter: _SessionTimelinePainter(sessions: sessions),
-      ),
+      child: CustomPaint(painter: _SessionTimelinePainter(sessions: sessions)),
     );
   }
 }
@@ -1034,7 +1141,7 @@ class _SessionTimelinePainter extends CustomPainter {
     // Background segments (6am-6pm day, else night)
     final dayPaint = Paint()..color = _white.withValues(alpha: 0.03);
     final nightPaint = Paint()..color = _white.withValues(alpha: 0.01);
-    
+
     // Simple 24h split for visual guide
     final hrW = w / 24;
     canvas.drawRect(Rect.fromLTWH(0, 0, 6 * hrW, h), nightPaint);
@@ -1072,16 +1179,19 @@ class _SessionTimelinePainter extends CustomPainter {
       if (definedSec <= 0) continue;
 
       // Calculate X position (0-24h) with second precision for alignment
-      final hourFrac = startTime.hour + (startTime.minute / 60.0) + (startTime.second / 3600.0);
+      final hourFrac =
+          startTime.hour +
+          (startTime.minute / 60.0) +
+          (startTime.second / 3600.0);
       final startX = hourFrac * hrW;
-      
+
       // Calculate width (proportional to defined duration)
       final width = (definedSec / 3600.0) * hrW;
-      
+
       // Bar styling
       final rect = Rect.fromLTWH(startX, h * 0.1, width.clamp(2.0, w), h * 0.8);
       final rrect = RRect.fromRectAndRadius(rect, const Radius.circular(2));
-      
+
       // Draw "Defined" background
       final bgPaint = Paint()..color = const Color(0xFF222222);
       canvas.drawRRect(rrect, bgPaint);
@@ -1090,20 +1200,32 @@ class _SessionTimelinePainter extends CustomPainter {
       final fillRatio = (actualSec / definedSec).clamp(0.0, 1.0);
       final fillWidth = width * fillRatio;
       if (fillWidth > 0.5) {
-        final fillRect = Rect.fromLTWH(startX, h * 0.1, fillWidth.clamp(1.0, width), h * 0.8);
-        final fillRRect = RRect.fromRectAndRadius(fillRect, const Radius.circular(2));
+        final fillRect = Rect.fromLTWH(
+          startX,
+          h * 0.1,
+          fillWidth.clamp(1.0, width),
+          h * 0.8,
+        );
+        final fillRRect = RRect.fromRectAndRadius(
+          fillRect,
+          const Radius.circular(2),
+        );
         final fillPaint = Paint()..color = _white.withValues(alpha: 0.8);
         canvas.drawRRect(fillRRect, fillPaint);
       }
-      
+
       // Border
-      final borderPaint = Paint()..color = _white.withValues(alpha: 0.2)..style = PaintingStyle.stroke..strokeWidth = 0.5;
+      final borderPaint = Paint()
+        ..color = _white.withValues(alpha: 0.2)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 0.5;
       canvas.drawRRect(rrect, borderPaint);
     }
   }
 
   @override
-  bool shouldRepaint(covariant _SessionTimelinePainter old) => old.sessions != sessions;
+  bool shouldRepaint(covariant _SessionTimelinePainter old) =>
+      old.sessions != sessions;
 }
 
 class _TimeAxis extends StatelessWidget {
@@ -1180,23 +1302,18 @@ class _DayHeatmapPainter extends CustomPainter {
     for (int hr = 0; hr < 24; hr++) {
       final v = hourly[hr];
       if (v <= 0) continue;
-      
+
       // Width proportional to study seconds in that hour
       final ratio = (v / 3600.0).clamp(0.05, 1.0);
       final bw = cellW * ratio;
       final bh = h * 0.8; // Fixed height for a cleaner timeline look
-      
+
       final Paint p = Paint()
         ..color = _white.withValues(alpha: (0.5 + ratio * 0.4).clamp(0.5, 0.9));
-      
+
       canvas.drawRRect(
         RRect.fromRectAndRadius(
-          Rect.fromLTWH(
-            hr * cellW + (cellW - bw) / 2, 
-            (h - bh) / 2, 
-            bw, 
-            bh
-          ),
+          Rect.fromLTWH(hr * cellW + (cellW - bw) / 2, (h - bh) / 2, bw, bh),
           const Radius.circular(1.0),
         ),
         p,
@@ -1280,10 +1397,9 @@ class _TaskAnalyticsCard extends StatelessWidget {
     }
 
     // Filter tasks >= 1 minute
-    final sortedTasks = taskTotals.entries
-        .where((e) => e.value.$2 >= 60)
-        .toList()
-      ..sort((a, b) => b.value.$2.compareTo(a.value.$2));
+    final sortedTasks =
+        taskTotals.entries.where((e) => e.value.$2 >= 60).toList()
+          ..sort((a, b) => b.value.$2.compareTo(a.value.$2));
 
     if (sortedTasks.isEmpty) {
       return _CardShell(
@@ -1509,12 +1625,15 @@ class _FocusDistributionCard extends StatelessWidget {
       final sec = (item['seconds'] as num? ?? 0).toInt();
       taskTotals[id] = (title, (taskTotals[id]?.$2 ?? 0) + sec);
     }
-    
+
     int taskStudySecTotal = taskTotals.values.fold(0, (a, b) => a + b.$2);
-    final sorted = taskTotals.entries.toList()..sort((a, b) => b.value.$2.compareTo(a.value.$2));
+    final sorted = taskTotals.entries.toList()
+      ..sort((a, b) => b.value.$2.compareTo(a.value.$2));
     String topTask = sorted.isEmpty ? 'None' : sorted.first.value.$1;
     final totalStudySec = window.totalStudySeconds;
-    final taskPct = totalStudySec > 0 ? (taskStudySecTotal / totalStudySec).clamp(0.0, 1.0) : 0.0;
+    final taskPct = totalStudySec > 0
+        ? (taskStudySecTotal / totalStudySec).clamp(0.0, 1.0)
+        : 0.0;
 
     return _CardShell(
       title: 'Focus Time Distribution',
@@ -1721,11 +1840,13 @@ class _FocusTimeBarCardState extends State<_FocusTimeBarCard> {
     final values = days
         .map((d) => (((d['studySeconds'] as num?) ?? 0).toInt()) / 3600.0)
         .toList();
-    
-    final double maxActual = values.isEmpty ? 0.0 : values.reduce((a, b) => a > b ? a : b);
+
+    final double maxActual = values.isEmpty
+        ? 0.0
+        : values.reduce((a, b) => a > b ? a : b);
     // Ceiling Logic: Round up to next hour, plus a 1h buffer to show a "gap"
     final double maxV = (maxActual + 1.0).ceilToDouble();
-    
+
     final activeDays = values.where((v) => v > 0).length;
     final avg = values.isEmpty
         ? 0.0

@@ -31,6 +31,14 @@ object BlockerConfig {
     private val _dailyLimitsInMinutes = AtomicReference<Map<String, Int>>(emptyMap())
     val dailyLimitsInMinutes: Map<String, Int> get() = _dailyLimitsInMinutes.get()
 
+    /** Packages that have the granular Reels/Shorts blocker active. */
+    private val _shortsBlockEnabledPackages = AtomicReference<Set<String>>(emptySet())
+    val shortsBlockEnabledPackages: Set<String> get() = _shortsBlockEnabledPackages.get()
+
+    fun isShortsBlockEnabled(packageName: String): Boolean {
+        return _shortsBlockEnabledPackages.get().contains(packageName)
+    }
+
     /**
      * Per-package toggle for Smart Reels/Shorts blocker:
      *   true  → Allow the first one, then block after the next scroll (Toggle B).
@@ -122,12 +130,14 @@ object BlockerConfig {
         dailyLimits: Map<String, Int>,
         allowOneShort: Map<String, Boolean>,
         restrictedKeywords: Set<String>,
-        emergencyUseMaxCounts: Map<String, Int> = emptyMap()
+        emergencyUseMaxCounts: Map<String, Int> = emptyMap(),
+        shortsBlockEnabledPackages: Set<String> = emptySet()
     ) {
         _blockedPackages.set(blockedPackages.toSet())
         _dailyLimitsInMinutes.set(HashMap(dailyLimits))
         _allowOneShortMap.set(HashMap(allowOneShort))
         _restrictedKeywords.set(restrictedKeywords.toSet())
         _emergencyUseMaxCounts.set(HashMap(emergencyUseMaxCounts))
+        _shortsBlockEnabledPackages.set(shortsBlockEnabledPackages.toSet())
     }
 }

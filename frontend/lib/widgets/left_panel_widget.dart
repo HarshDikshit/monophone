@@ -7,7 +7,7 @@ import '../services/unified_task_service.dart';
 /// A compact left-panel sidebar with:
 ///   - Quick Task Block Creation
 ///   - Compact Timeline View
-///   - Global Pomodoro Play/Pause controls
+///   - Global Focus Timer Play/Pause controls
 class LeftPanelWidget extends StatefulWidget {
   final VoidCallback? onToggleView;
   final VoidCallback? onAddTask;
@@ -43,37 +43,28 @@ class _LeftPanelWidgetState extends State<LeftPanelWidget> {
             onTap: widget.onToggleView ?? () {},
           ),
           const Spacer(),
-          // ── Pomodoro Global Controls ──
+          // ── Focus Global Controls ──
           _panelBtn(
-            icon: state.isPomodoroActive ? Icons.pause : Icons.play_arrow,
-            label: state.isPomodoroActive ? 'STOP' : 'START',
-            color: state.isPomodoroActive ? Colors.redAccent : Colors.white,
+            icon: state.isFocusActive ? Icons.pause : Icons.play_arrow,
+            label: state.isFocusActive ? 'STOP' : 'START',
+            color: state.isFocusActive ? Colors.redAccent : Colors.white,
             onTap: () {
-              if (state.isPomodoroActive) {
-                state.stopPomodoro();
+              if (state.isFocusActive) {
+                state.stopFocusTimer(manual: true);
               } else {
-                state.startPomodoro();
+                state.startFocusTimer();
               }
             },
           ),
           const SizedBox(height: 8),
-          // ── Pomodoro timer mini display ──
-          if (state.isPomodoroActive) ...[
+          // ── Focus timer mini display ──
+          if (state.isFocusActive) ...[
             Text(
-              _fmtTime(state.pomodoroSecondsRemaining),
+              state.focusElapsedSecondsFormatted,
               style: const TextStyle(
                 color: Colors.white38,
                 fontFamily: 'monospace',
                 fontSize: 10,
-              ),
-            ),
-            Text(
-              state.isBreak ? 'BREAK' : 'FOCUS',
-              style: TextStyle(
-                color: state.isBreak ? Colors.orange : Colors.greenAccent,
-                fontFamily: 'monospace',
-                fontSize: 7,
-                letterSpacing: 1,
               ),
             ),
           ],

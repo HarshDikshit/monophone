@@ -8,9 +8,14 @@ import 'api_service.dart';
 import 'blocker_service.dart';
 import 'offline_sync_service.dart';
 import 'task_planner_service.dart';
+import '../widgets/battery_dialog.dart';
 
 class LauncherState extends ChangeNotifier {
   static const _channel = MethodChannel('com.dixit.monophone/launcher');
+
+  /// Global navigator key for showing dialogs from services without context.
+  /// Set this in the MaterialApp constructor.
+  static final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
   // Timer mode: 'countdown' or 'countup'
   String _timerMode = 'countdown';
@@ -54,50 +59,46 @@ class LauncherState extends ChangeNotifier {
   Map<String, int> _weeklyStudyData = {};
   Map<String, int> get weeklyStudyData => _weeklyStudyData;
 
-  // Pomodoro
-  bool _isPomodoroActive = false;
-  bool _isBreak = false;
+  // Focus Timer
+  bool _isFocusActive = false;
+  bool _isPaused = false;
+  bool get isPaused => _isPaused;
+  bool _isManuallyStopped = false;
 
-  /// COUNTDOWN: seconds remaining (counts down to 0)
-  /// COUNTUP:   seconds elapsed (counts up from 0)
-  int _pomodoroSecondsRemaining = 25 * 60;
-  int _pomodoroTotalDurationSeconds = 25 * 60;
-  // Date key when the current pomodoro session started (for cross-day splitting)
-  String _pomodoroSessionDateKey = '';
+  /// Seconds elapsed (counts up from 0)
+  int _focusElapsedSeconds = 0;
 
-  // Pending seconds track time since last commit. These all belong to the current day.
-  int _pomodoroPendingFocusSeconds = 0;
-  int _pomodoroPendingTaskSeconds = 0;
-  int _pomodoroTickCounter = 0; // for periodic commits
-  bool _pomodoroDirty = false;
-  Timer? _pomodoroTimer;
+  // Pending seconds track time since last commit.
+  int _focusPendingSeconds = 0;
+  int _focusTickCounter = 0; // for periodic commits
+  bool _focusDirty = false;
   String _lastCommitedDay = '';
 
   // New detailed analytics tracking
   List<int> _hourlyStudySeconds = List.filled(24, 0);
   Map<String, int> _taskStudySeconds = {};
-  List<Map<String, dynamic>> _pomoSessions = [];
+  List<Map<String, dynamic>> _focusSessions = [];
 
   // Track current session details
   DateTime? _currentSessionStart;
-  int? _currentSessionDefinedSeconds;
 
-  bool get isPomodoroActive => _isPomodoroActive;
-  bool get isBreak => _isBreak;
+  bool get isFocusActive => _isFocusActive;
 
-  /// Returns the displayed time value:
-  /// - countdown: remaining seconds
-  /// - countup:   elapsed seconds
-  int get pomodoroSecondsRemaining => _pomodoroSecondsRemaining;
+  int get focusElapsedSeconds => _focusElapsedSeconds;
 
-  /// Returns the actual elapsed focus seconds accounting for mode
-  int get pomodoroElapsedSeconds {
-    if (!_isPomodoroActive) return 0;
-    if (_timerMode == 'countup') return _pomodoroSecondsRemaining;
-    return _pomodoroTotalDurationSeconds - _pomodoroSecondsRemaining;
+  int get studySeconds => _studySeconds + _focusPendingSeconds;
+
+  String get focusElapsedSecondsFormatted {
+    final m = _focusElapsedSeconds ~/ 60;
+    final s = _focusElapsedSeconds % 60;
+    return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
   }
 
-  int get studySeconds => _studySeconds + _pomodoroPendingFocusSeconds;
+  // Legacy aliases for Pomodoro backward compatibility
+  bool get isPomodoroActive => _isFocusActive;
+  bool get isBreak => false;
+  int get pomodoroSecondsRemaining =>
+      0; // Not applicable for count-up stopwatch
 
   // NO MORE LOCAL _tasks. We use _plannerService exclusively.
 
@@ -149,7 +150,7 @@ class LauncherState extends ChangeNotifier {
     if (prefs.getString('last_sync_date') != today) {
       _syncStatsToBackend();
     }
-    
+
     _lastCommitedDay = prefs.getString('last_commited_day') ?? today;
     if (_lastCommitedDay != today) {
       // Midnight shift happened!
@@ -157,7 +158,7 @@ class LauncherState extends ChangeNotifier {
       _distractedSeconds = 0;
       _hourlyStudySeconds = List.filled(24, 0);
       _taskStudySeconds = {};
-      _pomoSessions = [];
+      _focusSessions = [];
       _lastCommitedDay = today;
       await prefs.setString('last_commited_day', today);
       _saveLocalStats();
@@ -188,102 +189,70 @@ class LauncherState extends ChangeNotifier {
   void _initMethodChannel() {
     _channel.setMethodCallHandler((call) async {
       switch (call.method) {
-        case 'onPomodoroTick':
-          _pomodoroSecondsRemaining = call.arguments['secondsRemaining'] ?? 0;
-          final bool isBreakVal = call.arguments['isBreak'] ?? false;
-          _isBreak = isBreakVal;
-          // Each tick = 1 second of focus time. Track as pending.
-          if (_isPomodoroActive && !_isBreak) {
+        case 'onFocusTick':
+          _focusElapsedSeconds = call.arguments['elapsedSeconds'] ?? 0;
+
+          if (_isFocusActive && !_isPaused) {
             _checkMidnightReset();
-            _pomodoroPendingFocusSeconds += 1;
-            _pomodoroPendingTaskSeconds += 1;
-            _pomodoroDirty = true;
+            _focusPendingSeconds += 1;
+            _focusDirty = true;
 
             // Increment hourly bucket
             final hour = DateTime.now().hour;
             _hourlyStudySeconds[hour] += 1;
 
+            // Real-time task attribution: immediately assign each second to the
+            // active task so that task.focusSeconds stays continuously updated.
+            // This ensures the day planner UI, analytics screen, and all task
+            // analytics reflect the focus time in realtime (every 1 second).
+            if (_activeTaskId != null) {
+              _attributeSecondsToTask(_activeTaskId, 1, persist: false);
+            }
+
             // Periodic commit every 60 seconds to prevent data loss
-            _pomodoroTickCounter++;
-            if (_pomodoroTickCounter >= 60) {
-              _pomodoroTickCounter = 0;
-              _commitPomodoroProgress(sync: true);
+            _focusTickCounter++;
+            if (_focusTickCounter >= 60) {
+              _focusTickCounter = 0;
+              _commitFocusProgress(sync: true);
             }
           }
           notifyListeners();
           break;
-        case 'onPomodoroStateChanged':
+        case 'onFocusStateChanged':
           final String status = call.arguments['status'] ?? "STOPPED";
-          final int seconds = call.arguments['secondsRemaining'] ?? 0;
-          final bool isBreakVal = call.arguments['isBreak'] ?? false;
+          final int elapsed = call.arguments['elapsedSeconds'] ?? 0;
           final String task = call.arguments['taskName'] ?? "";
 
           if (status == "STOPPED") {
-            final double sessionDuration = _pomodoroTotalDurationSeconds
-                .toDouble();
-            final bool wasBreak = _isBreak;
-
-            await _commitPomodoroProgress(sync: true);
-
-            if (!wasBreak) {
-              _incrementActiveTaskPomodoro();
-              // Logic Check: Pomodoro finished
-              if (_autoStartBreak) {
-                // Wait briefly then start break
-                Future.delayed(const Duration(milliseconds: 500), () {
-                  startBreak();
-                });
-              } else if (_autoStartNextPomodoro) {
-                // Skip break, start next pomodoro
-                Future.delayed(const Duration(milliseconds: 500), () {
-                  startPomodoro();
-                });
-              }
-            } else {
-              // Break finished
-              if (_autoStartNextPomodoro) {
-                Future.delayed(const Duration(milliseconds: 500), () {
-                  startPomodoro();
-                });
-              }
+            if (_isPaused) {
+              _isFocusActive = true;
+              notifyListeners();
+              break;
             }
 
-            _isPomodoroActive = false;
-            _pomodoroTotalDurationSeconds = _customDurationSeconds;
-            _pomodoroSessionDateKey = '';
+            await _commitFocusProgress(sync: true);
 
-            // Play alert sound if enabled
-            if (_soundEnabled) {
-              _playAlertSound();
+            final bool wasManualStop = call.arguments['manual'] ?? false;
+            if (wasManualStop) {
+              _isManuallyStopped = true;
             }
-          } else if (status == "BREAK") {
-            if (!_isBreak && isBreakVal) {
-              await _commitPomodoroProgress(sync: true);
-              _incrementActiveTaskPomodoro();
-            }
-            _isPomodoroActive = true;
-            _isBreak = isBreakVal;
-            _pomodoroSecondsRemaining = seconds;
-            _pomodoroTotalDurationSeconds = 5 * 60;
+
+            _isFocusActive = false;
+            _isPaused = false;
+            _isManuallyStopped = false;
+            _focusElapsedSeconds = 0;
           } else {
-            // FOCUSING / any other status
-            _isPomodoroActive = true;
-            _isBreak = isBreakVal;
-            _pomodoroSecondsRemaining = seconds;
-            if (task.isNotEmpty) {
+            // RUNNING
+            _isFocusActive = true;
+            _focusElapsedSeconds = elapsed;
+            if (_activeTaskId == null && task.isNotEmpty) {
               _lastGoal = task;
+              _activeTaskId = call.arguments['taskId'];
             }
-            _lastTaskActivityTime = DateTime.now();
-            if (!_isBreak) {
-              _pomodoroTotalDurationSeconds = _pomodoroTotalDurationSeconds > 0
-                  ? _pomodoroTotalDurationSeconds
-                  : _customDurationSeconds;
+          }
 
-              if (_currentSessionStart == null) {
-                _currentSessionStart = DateTime.now();
-                _currentSessionDefinedSeconds = _pomodoroTotalDurationSeconds;
-              }
-            }
+          if (_currentSessionStart == null && _isFocusActive) {
+            _currentSessionStart = DateTime.now();
           }
           notifyListeners();
           break;
@@ -366,17 +335,17 @@ class LauncherState extends ChangeNotifier {
       _taskStudySeconds = {};
     }
 
-    final sessionJson = prefs.getString('pomo_sessions_$todayStr');
+    final sessionJson = prefs.getString('focus_sessions_$todayStr');
     if (sessionJson != null) {
       try {
-        _pomoSessions = List<Map<String, dynamic>>.from(
+        _focusSessions = List<Map<String, dynamic>>.from(
           jsonDecode(sessionJson),
         );
       } catch (_) {
-        _pomoSessions = [];
+        _focusSessions = [];
       }
     } else {
-      _pomoSessions = [];
+      _focusSessions = [];
     }
 
     _lastGoal = prefs.getString('last_goal') ?? '';
@@ -388,8 +357,6 @@ class LauncherState extends ChangeNotifier {
     _doubleTapLockScreen = prefs.getBool('double_tap_lock_screen') ?? false;
     _doubleTapOpenDrawer = prefs.getBool('double_tap_open_drawer') ?? false;
 
-    _autoStartNextPomodoro = prefs.getBool('pomo_auto_start_next') ?? false;
-    _autoStartBreak = prefs.getBool('pomo_auto_start_break') ?? false;
     _vibrationEnabled = prefs.getBool('pomo_vibration') ?? true;
     _soundEnabled = prefs.getBool('pomo_sound') ?? true;
 
@@ -398,14 +365,13 @@ class LauncherState extends ChangeNotifier {
 
     try {
       final Map<dynamic, dynamic>? nativeState = await _channel.invokeMethod(
-        'getPomodoroState',
+        'getFocusState',
       );
       if (nativeState != null) {
-        _isPomodoroActive = true;
-        _pomodoroSecondsRemaining = nativeState['secondsRemaining'] ?? 0;
-        _isBreak = nativeState['isBreak'] ?? false;
+        _isFocusActive = true;
+        _focusElapsedSeconds = nativeState['elapsedSeconds'] ?? 0;
         _lastGoal = nativeState['taskName'] ?? _lastGoal;
-        _timerMode = nativeState['timerMode'] ?? _timerMode;
+        _activeTaskId = nativeState['taskId'] ?? _activeTaskId;
       }
     } catch (_) {}
 
@@ -450,18 +416,20 @@ class LauncherState extends ChangeNotifier {
   void _checkMidnightReset() async {
     final today = _todayKey();
     if (_lastCommitedDay != today && _lastCommitedDay.isNotEmpty) {
-      debugPrint("Midnight transition detected! Committing old day: $_lastCommitedDay");
+      debugPrint(
+        "Midnight transition detected! Committing old day: $_lastCommitedDay",
+      );
       // 1. Commit whatever was pending for the OLD day
-      await _commitPomodoroProgress(sync: true);
-      
+      await _commitFocusProgress(sync: true);
+
       // 2. Reset everything for the NEW day
       _studySeconds = 0;
       _distractedSeconds = 0;
       _hourlyStudySeconds = List.filled(24, 0);
       _taskStudySeconds = {};
-      _pomoSessions = [];
+      _focusSessions = [];
       _lastCommitedDay = today;
-      
+
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('last_commited_day', today);
       await _saveLocalStats();
@@ -469,8 +437,8 @@ class LauncherState extends ChangeNotifier {
     }
   }
 
-  Future<void> _commitPomodoroProgress({bool sync = false}) async {
-    if (_pomodoroPendingFocusSeconds <= 0) {
+  Future<void> _commitFocusProgress({bool sync = false}) async {
+    if (_focusPendingSeconds <= 0) {
       if (sync && (await ApiService.getToken()) != null) {
         await _syncStatsToBackend();
       }
@@ -480,26 +448,8 @@ class LauncherState extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     final todayStr = _todayKey();
 
-    // CRITICAL FIX: Before adding pending seconds to _studySeconds, ensure
-    // _studySeconds belongs to TODAY. If it was loaded from a previous day
-    // (e.g., pomodoro crossed midnight), save it to its original day first,
-    // then reload today's value.
-    // We track which date _studySeconds was last loaded for by checking
-    // the stored value against today's key. If _studySeconds was not yet
-    // saved/loaded for today, save it out to the old key first.
-    // Compare today's stored value vs _studySeconds to detect day drift.
     final todayStored = prefs.getInt('study_seconds_$todayStr') ?? 0;
     if (todayStored != _studySeconds && _studySeconds > 0) {
-      // _studySeconds does NOT match today's stored value. This means
-      // _studySeconds still has yesterday's (or an earlier day's) value.
-      // The pending seconds we're about to commit are from TODAY (the
-      // current tick time). We need to:
-      // 1. Save _studySeconds to whatever day it belonged to (we find it
-      //    by scanning back a few days to find a match)
-      // 2. Reload today's value into _studySeconds
-      // 3. Add pending (today's time) to today's _studySeconds
-
-      // Try to find which day _studySeconds matches in storage (last 3 days)
       bool foundDay = false;
       for (int d = 1; d <= 3; d++) {
         final past = DateTime.now().subtract(Duration(days: d));
@@ -512,7 +462,6 @@ class LauncherState extends ChangeNotifier {
         }
       }
 
-      // If we can't match, just save _studySeconds to yesterday to be safe
       if (!foundDay) {
         final yesterday = DateTime.now().subtract(const Duration(days: 1));
         final yesterdayKey =
@@ -520,40 +469,31 @@ class LauncherState extends ChangeNotifier {
         await prefs.setInt('study_seconds_$yesterdayKey', _studySeconds);
       }
 
-      // Now reload today's stats
       _studySeconds = todayStored;
     }
 
-    // Now _studySeconds definitely belongs to today. Add pending (today's time).
-    _studySeconds += _pomodoroPendingFocusSeconds;
-    final taskSeconds = _pomodoroPendingTaskSeconds;
+    _studySeconds += _focusPendingSeconds;
+    final taskSeconds = _focusPendingSeconds;
 
     if (_currentSessionStart != null && taskSeconds > 0) {
       final now = DateTime.now();
-      _pomoSessions.add({
+      _focusSessions.add({
         'startTime': _currentSessionStart!.toIso8601String(),
         'endTime': now.toIso8601String(),
-        // We use taskSeconds for both to show a solid block in the timeline
-        // representing the ACTUAL focus time during this segment.
-        'definedSeconds': taskSeconds,
         'actualSeconds': taskSeconds,
         'taskId': _activeTaskId,
         'title': _lastGoal,
-        'isBreak': _isBreak,
       });
 
-      // If we are still focused, reset start time to now for the NEXT segment
-      if (_isPomodoroActive) {
+      if (_isFocusActive) {
         _currentSessionStart = now;
       } else {
         _currentSessionStart = null;
       }
-      _currentSessionDefinedSeconds = null;
     }
 
-    _pomodoroPendingFocusSeconds = 0;
-    _pomodoroPendingTaskSeconds = 0;
-    _pomodoroDirty = true;
+    _focusPendingSeconds = 0;
+    _focusDirty = true;
 
     if (_activeTaskId != null && taskSeconds > 0) {
       _attributeSecondsToTask(_activeTaskId, taskSeconds);
@@ -563,7 +503,7 @@ class LauncherState extends ChangeNotifier {
     if (sync) {
       await _syncStatsToBackend();
     }
-    _pomodoroDirty = false;
+    _focusDirty = false;
   }
 
   Future<void> _saveLocalStats() async {
@@ -579,7 +519,10 @@ class LauncherState extends ChangeNotifier {
       'task_seconds_$todayStr',
       jsonEncode(_taskStudySeconds),
     );
-    await prefs.setString('pomo_sessions_$todayStr', jsonEncode(_pomoSessions));
+    await prefs.setString(
+      'focus_sessions_$todayStr',
+      jsonEncode(_focusSessions),
+    );
     await prefs.setString('last_goal', _lastGoal);
     await prefs.setString('last_commited_day', _lastCommitedDay);
     await loadWeeklyData();
@@ -628,9 +571,7 @@ class LauncherState extends ChangeNotifier {
 
   Future<bool> launchApp(String packageName) async {
     try {
-      if (_isPomodoroActive &&
-          !_isBreak &&
-          _distractionApps.contains(packageName)) {
+      if (_isFocusActive && _distractionApps.contains(packageName)) {
         return false;
       }
 
@@ -678,7 +619,8 @@ class LauncherState extends ChangeNotifier {
 
     // Throttle native checks to at most once every 5 minutes
     // OR if permissions were previously missing (to auto-detect grant)
-    final bool shouldCheckNative = _lastPermissionCheck == null ||
+    final bool shouldCheckNative =
+        _lastPermissionCheck == null ||
         now.difference(_lastPermissionCheck!).inMinutes >= 5 ||
         !_isDefaultLauncher; // Always check if not default yet
 
@@ -720,10 +662,9 @@ class LauncherState extends ChangeNotifier {
           final hour = DateTime.now().hour;
           _hourlyStudySeconds[hour] += elapsed;
 
-          _pomoSessions.add({
+          _focusSessions.add({
             'startTime': _exitTime!.toIso8601String(),
             'endTime': DateTime.now().toIso8601String(),
-            'definedSeconds': elapsed,
             'actualSeconds': elapsed,
             'taskId': _activeTaskId,
             'title': _activeTaskId != null
@@ -741,7 +682,7 @@ class LauncherState extends ChangeNotifier {
         } else if (_distractionApps.contains(_lastLaunchedPackage)) {
           _distractedSeconds += elapsed;
         } else {
-          if (_isPomodoroActive && !_isBreak) {
+          if (_isFocusActive) {
             _studySeconds += elapsed;
             _attributeSecondsToTask(_activeTaskId, elapsed);
           }
@@ -766,7 +707,7 @@ class LauncherState extends ChangeNotifier {
             'distracted_seconds_$yesterdayStr',
             prevDistracted + elapsed,
           );
-        } else if (_isPomodoroActive && !_isBreak) {
+        } else if (_isFocusActive) {
           await prefs.setInt(
             'study_seconds_$yesterdayStr',
             prevStudy + elapsed,
@@ -785,20 +726,21 @@ class LauncherState extends ChangeNotifier {
 
       try {
         await ApiService.updateStatus(
-          _isPomodoroActive && !_isBreak ? 'Focusing ⚡' : 'Idle',
-          _isPomodoroActive && !_isBreak,
+          _isFocusActive ? 'Focusing ⚡' : 'Idle',
+          _isFocusActive,
         );
       } catch (_) {
         await OfflineSyncService.instance.queueStatusUpdate(
-          _isPomodoroActive && !_isBreak ? 'Focusing ⚡' : 'Idle',
-          _isPomodoroActive && !_isBreak,
+          _isFocusActive ? 'Focusing ⚡' : 'Idle',
+          _isFocusActive,
         );
       }
 
       // Throttle backend sync to at most once every 10 minutes
       // unless significant time was spent (handled by syncStatsToBackend internally or here)
       final bool significantActivity = elapsed > 60;
-      final bool shouldSync = _lastSyncTime == null ||
+      final bool shouldSync =
+          _lastSyncTime == null ||
           now.difference(_lastSyncTime!).inMinutes >= 10 ||
           significantActivity;
 
@@ -836,14 +778,15 @@ class LauncherState extends ChangeNotifier {
               'seconds': e.value,
             };
           }).toList(),
-          sessions: _pomoSessions,
+          sessions: _focusSessions,
         );
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('last_sync_date', today);
         _lastSyncTime = DateTime.now();
 
         // Throttle profile fetch and AI headlines to once an hour
-        final bool shouldFetchProfile = _lastProfileFetch == null ||
+        final bool shouldFetchProfile =
+            _lastProfileFetch == null ||
             _lastSyncTime!.difference(_lastProfileFetch!).inHours >= 1;
 
         if (shouldFetchProfile) {
@@ -956,8 +899,8 @@ class LauncherState extends ChangeNotifier {
     } catch (_) {}
   }
 
-  void startPomodoro() async {
-    if (_isPomodoroActive) return;
+  void startFocusTimer() async {
+    if (_isFocusActive) return;
 
     final hasPermission = await checkUsagePermission();
     if (!hasPermission) {
@@ -977,112 +920,61 @@ class LauncherState extends ChangeNotifier {
       return;
     }
 
-    _isPomodoroActive = true;
-    _isBreak = false;
+    // Demand battery unrestricted mode via a sweet, clear dialog.
+    // The user must manually set it or explicitly choose to continue without it.
+    final batteryOk = await BatteryOptimizationDialog.showIfNeeded();
+    
+    if (!batteryOk) {
+      // User chose "Continue anyway" - allow them to proceed
+    }
+    
+    await checkBatteryOptimizationStatus();
+    if (!_isBatteryOptimizationIgnored) {
+      _showBatteryPrompt = true;
+      notifyListeners();
+      return;
+    }
 
-    // COUNTDOWN: secondsRemaining starts at duration, counts down
-    // COUNTUP:   secondsRemaining starts at 0, counts up (elapsed)
-    _pomodoroSecondsRemaining = _timerMode == 'countdown'
-        ? _customDurationSeconds
-        : 0;
-    _pomodoroTotalDurationSeconds = _customDurationSeconds;
-    _pomodoroPendingFocusSeconds = 0;
-    _pomodoroPendingTaskSeconds = 0;
-    _pomodoroDirty = false;
-    _pomodoroSessionDateKey = _todayKey();
+    _isFocusActive = true;
+    _isManuallyStopped = false;
 
-    // NOTE: No startMonitoring() call — we intentionally removed the native
-    // app-blocking hard lock. Pomodoro is a soft focus timer only; it does
-    // NOT forcefully block apps on the native side.
+    _focusElapsedSeconds = 0;
+    _focusPendingSeconds = 0;
+    _focusDirty = false;
 
-    await _channel.invokeMethod('startPomodoro', {
+    await _channel.invokeMethod('startFocusTimer', {
       'taskName': _lastGoal.isNotEmpty ? _lastGoal : "Focus Session",
-      'durationSeconds': _customDurationSeconds,
-      'isBreak': false,
-      'timerMode': _timerMode,
-      'autoStartBreak': _autoStartBreak,
-      'autoStartNextPomodoro': _autoStartNextPomodoro,
+      'taskId': _activeTaskId,
       'soundEnabled': _soundEnabled,
       'vibrationEnabled': _vibrationEnabled,
     });
 
-    await ApiService.updateStatus('Focusing (Pomodoro) ⚡', true);
+    await ApiService.updateStatus('Focusing ⚡', true);
     await _saveTimerPreferences();
     notifyListeners();
   }
 
-  void startBreak() async {
-    _isPomodoroActive = true;
-    _isBreak = true;
-    _pomodoroSecondsRemaining = 5 * 60; // Standard 5 min break
-    _pomodoroTotalDurationSeconds = 5 * 60;
+  void stopFocusTimer({bool manual = false}) async {
+    _isFocusActive = false;
+    _isPaused = false;
+    _isManuallyStopped = manual;
 
-    await _channel.invokeMethod('startPomodoro', {
-      'taskName': "Break Time",
-      'durationSeconds': 5 * 60,
-      'isBreak': true,
-      'timerMode': 'countdown',
-      'soundEnabled': _soundEnabled,
-      'vibrationEnabled': _vibrationEnabled,
-    });
-
-    notifyListeners();
-  }
-
-  final AudioPlayer _audioPlayer = AudioPlayer();
-  void _playAlertSound() async {
-    try {
-      await _audioPlayer.play(AssetSource('alert.mp3'));
-      Future.delayed(const Duration(seconds: 3), () {
-        _audioPlayer.stop();
-      });
-    } catch (e) {
-      debugPrint("Error playing alert sound: $e");
-    }
-  }
-
-  void stopPomodoro({bool manual = false}) async {
-    _isPomodoroActive = false;
-
-    if (manual) {
-      _autoStartNextPomodoro = false;
-      _autoStartBreak = false;
-      await _saveTimerPreferences();
-    }
-    // Note: No stopMonitoring() call needed here because startPomodoro()
-    // no longer starts native monitoring (hard lock was removed).
-    await _channel.invokeMethod('stopPomodoro');
-
+    await _channel.invokeMethod('stopFocusTimer');
     await ApiService.updateStatus('Idle', false);
-
-    await _commitPomodoroProgress(sync: true);
-    _pomodoroSessionDateKey = '';
+    await _commitFocusProgress(sync: true);
     notifyListeners();
   }
 
-  /// Pause the pomodoro timer without committing progress or stopping monitoring.
-  /// Saves remaining seconds so resume can pick up from where it left off.
-  void pausePomodoro() async {
-    if (!_isPomodoroActive) return;
+  void pauseFocusTimer() async {
+    if (!_isFocusActive) return;
 
-    // Save remaining seconds before stopping native timer
-    final savedSeconds = _pomodoroSecondsRemaining;
-    final savedDuration = _pomodoroTotalDurationSeconds;
-
-    // Commit any pending progress before stopping
-    await _commitPomodoroProgress();
-
-    await _channel.invokeMethod('stopPomodoro');
-
-    // Keep state true, just mark as not running
-    _pomodoroSecondsRemaining = savedSeconds;
-    _pomodoroTotalDurationSeconds = savedDuration;
+    _isPaused = true;
+    await _channel.invokeMethod('stopFocusTimer');
     notifyListeners();
   }
 
-  /// Resume a paused pomodoro timer from where it left off
-  void resumePomodoro() async {
-    if (_isPomodoroActive) return; // already running
+  void resumeFocusTimer() async {
+    if (!_isPaused) return;
 
     final hasPermission = await checkUsagePermission();
     if (!hasPermission) {
@@ -1090,14 +982,12 @@ class LauncherState extends ChangeNotifier {
       return;
     }
 
-    _isPomodoroActive = true;
-    _isBreak = false;
+    _isPaused = false;
 
-    await _channel.invokeMethod('startPomodoro', {
+    await _channel.invokeMethod('startFocusTimer', {
       'taskName': _lastGoal.isNotEmpty ? _lastGoal : "Focus Session",
-      'durationSeconds': _pomodoroSecondsRemaining,
-      'isBreak': false,
-      'timerMode': _timerMode,
+      'taskId': _activeTaskId,
+      'elapsedSeconds': _focusElapsedSeconds,
     });
 
     notifyListeners();
@@ -1252,6 +1142,7 @@ class LauncherState extends ChangeNotifier {
     required Map<String, bool> allowOneShort,
     required Set<String> restrictedKeywords,
     Map<String, int>? emergencyUseMaxCounts,
+    List<String> shortsBlockEnabledPackages = const [],
   }) async {
     try {
       await _channel.invokeMethod('configureBlockingRules', {
@@ -1260,6 +1151,7 @@ class LauncherState extends ChangeNotifier {
         'allowOneShort': allowOneShort,
         'restrictedKeywords': restrictedKeywords.toList(),
         'emergencyUseMaxCounts': emergencyUseMaxCounts ?? <String, int>{},
+        'shortsBlockEnabledPackages': shortsBlockEnabledPackages,
       });
     } catch (e) {
       debugPrint("Failed to configure blocking rules: $e");
@@ -1398,20 +1290,6 @@ class LauncherState extends ChangeNotifier {
   bool get vibrationEnabled => _vibrationEnabled;
   bool get soundEnabled => _soundEnabled;
 
-  Future<void> setAutoStartNextPomodoro(bool val) async {
-    _autoStartNextPomodoro = val;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('pomo_auto_start_next', val);
-    notifyListeners();
-  }
-
-  Future<void> setAutoStartBreak(bool val) async {
-    _autoStartBreak = val;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('pomo_auto_start_break', val);
-    notifyListeners();
-  }
-
   Future<void> setVibrationEnabled(bool val) async {
     _vibrationEnabled = val;
     final prefs = await SharedPreferences.getInstance();
@@ -1429,7 +1307,6 @@ class LauncherState extends ChangeNotifier {
   // --- Task Engine ---
   List<Map<String, dynamic>> get tasks {
     if (_plannerService == null) return [];
-    // Map TimeBlockTask to the old Map format for compatibility with existing UI
     return _plannerService!.tasks
         .map(
           (t) => {
@@ -1437,8 +1314,6 @@ class LauncherState extends ChangeNotifier {
             'title': t.title,
             'isDone': t.isCompleted,
             'focusSeconds': t.focusSeconds,
-            'completedPomodoroCount': t.completedPomodoros,
-            'estimatedPomodoros': t.estimatedPomodoros,
             'isRecurring': t.isRecurring,
           },
         )
@@ -1456,8 +1331,6 @@ class LauncherState extends ChangeNotifier {
         'title': t.title,
         'isDone': t.isCompleted,
         'focusSeconds': t.focusSeconds,
-        'completedPomodoroCount': t.completedPomodoros,
-        'estimatedPomodoros': t.estimatedPomodoros,
         'isRecurring': t.isRecurring,
       };
     } catch (_) {
@@ -1465,45 +1338,29 @@ class LauncherState extends ChangeNotifier {
     }
   }
 
-  void _attributeSecondsToTask(String? taskId, int seconds) {
+  void _attributeSecondsToTask(String? taskId, int seconds, {bool persist = true}) {
     if (taskId == null || seconds <= 0 || _plannerService == null) return;
-    _plannerService!.addFocusSeconds(taskId, seconds);
+    _plannerService!.addFocusSeconds(taskId, seconds, persist: persist);
 
     // Also track for today's specific analytics record
     _taskStudySeconds[taskId] = (_taskStudySeconds[taskId] ?? 0) + seconds;
   }
 
-  void _incrementActiveTaskPomodoro() {
-    if (_activeTaskId == null || _plannerService == null) return;
-    _plannerService!.incrementPomodoro(_activeTaskId!);
-  }
-
   Future<void> addTask(
     String title, {
     bool isRecurring = false,
-    int estimatedPomodoros = 1,
+    int durationMinutes = 60,
   }) async {
     if (_plannerService == null) return;
     final task = TimeBlockTask(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
       title: title,
       startTime: DateTime.now(),
-      estimatedPomodoros: estimatedPomodoros,
+      durationMinutes: durationMinutes,
       isRecurring: isRecurring,
       recurringDays: isRecurring ? [1, 2, 3, 4, 5, 6, 7] : [],
     );
     await _plannerService!.addTask(task);
-  }
-
-  Future<void> updateTaskEstimatedPomodoros(String taskId, int count) async {
-    if (_plannerService == null) return;
-    final idx = _plannerService!.tasks.indexWhere((t) => t.id == taskId);
-    if (idx != -1) {
-      final updated = _plannerService!.tasks[idx].copyWith(
-        estimatedPomodoros: count.clamp(1, 99),
-      );
-      await _plannerService!.updateTask(updated);
-    }
   }
 
   Future<void> deleteTask(String taskId) async {
@@ -1547,15 +1404,27 @@ class LauncherState extends ChangeNotifier {
   }
 
   void switchActiveTask(String? newTaskId, {String? taskName}) {
-    if (_isPomodoroActive && !_isBreak) {
-      // Attribute any pending focus time to the current task before switching
-      final pending = _pomodoroPendingTaskSeconds;
+    if (_isFocusActive) {
+      // Force immediate commit of ALL pending focus time to the current task
+      // before switching. This ensures precise per-task tracking even when
+      // the user rapidly switches between tasks.
+      final pending = _focusPendingSeconds;
       if (pending > 0) {
         _attributeSecondsToTask(_activeTaskId, pending);
         _studySeconds += pending;
-        _pomodoroPendingFocusSeconds = 0;
-        _pomodoroPendingTaskSeconds = 0;
+        _focusPendingSeconds = 0;
         _saveLocalStats();
+      }
+      // Also commit any elapsed seconds from the native timer that haven't
+      // been accounted for yet (the onFocusTick may have missed a tick)
+      if (_focusElapsedSeconds > 0) {
+        final unaccounted =
+            _focusElapsedSeconds - _focusPendingSeconds - _studySeconds;
+        if (unaccounted > 0) {
+          _attributeSecondsToTask(_activeTaskId, unaccounted);
+          _studySeconds += unaccounted;
+          _saveLocalStats();
+        }
       }
     }
     _activeTaskId = newTaskId;
@@ -1576,7 +1445,7 @@ class LauncherState extends ChangeNotifier {
     _lastGoal = newTaskName;
     _saveLocalStats();
 
-    if (_isPomodoroActive) {
+    if (_isFocusActive) {
       // Update native overlay task name and refresh its UI
       _channel.invokeMethod('updateTaskName', {'taskName': newTaskName});
     }
@@ -1672,7 +1541,7 @@ class LauncherState extends ChangeNotifier {
       }
     }
     final allowOneShortMap = <String, bool>{};
-    
+
     if (blockYoutubeShorts) {
       for (final app in _allApps) {
         final name = (app['name'] ?? '').toLowerCase().trim();
@@ -1691,14 +1560,15 @@ class LauncherState extends ChangeNotifier {
         }
       }
     }
-    
+
     // Fallback for tiktok/facebook if any block is enabled (legacy support)
     if (blockYoutubeShorts || blockInstagramReels) {
       for (final app in _allApps) {
         final name = (app['name'] ?? '').toLowerCase().trim();
         if (name.contains('tiktok') || name.contains('facebook')) {
           blockedPackageNames.add(app['packageName']!);
-          allowOneShortMap[app['packageName']!] = false; // default to block completely
+          allowOneShortMap[app['packageName']!] =
+              false; // default to block completely
         }
       }
     }
@@ -1734,12 +1604,30 @@ class LauncherState extends ChangeNotifier {
       }
     });
 
+    // Build list of packages for Reels/Shorts blocker specifically
+    final shortsBlockEnabledPackages = <String>[];
+    if (blockYoutubeShorts) {
+      for (final app in _allApps) {
+        if ((app['name'] ?? '').toLowerCase().contains('youtube')) {
+          shortsBlockEnabledPackages.add(app['packageName']!);
+        }
+      }
+    }
+    if (blockInstagramReels) {
+      for (final app in _allApps) {
+        if ((app['name'] ?? '').toLowerCase().contains('instagram')) {
+          shortsBlockEnabledPackages.add(app['packageName']!);
+        }
+      }
+    }
+
     await configureBlockingRules(
       blockedPackages: blockedPackageNames,
       dailyLimits: dailyLimitsMap,
       allowOneShort: allowOneShortMap,
       restrictedKeywords: restrictedKeywords.toSet(),
       emergencyUseMaxCounts: emergencyUseMaxMap,
+      shortsBlockEnabledPackages: shortsBlockEnabledPackages,
     );
 
     // Restart daily monitoring to apply new limits
@@ -1788,7 +1676,8 @@ class LauncherState extends ChangeNotifier {
 
   Future<bool> hasUsageAccessPermission() async {
     try {
-      return await _channel.invokeMethod<bool>('hasUsageAccessPermission') ?? false;
+      return await _channel.invokeMethod<bool>('hasUsageAccessPermission') ??
+          false;
     } catch (_) {
       return false;
     }
@@ -1802,7 +1691,10 @@ class LauncherState extends ChangeNotifier {
 
   Future<bool> hasWriteSecureSettingsPermission() async {
     try {
-      return await _channel.invokeMethod<bool>('hasWriteSecureSettingsPermission') ?? false;
+      return await _channel.invokeMethod<bool>(
+            'hasWriteSecureSettingsPermission',
+          ) ??
+          false;
     } catch (_) {
       return false;
     }
@@ -1812,7 +1704,10 @@ class LauncherState extends ChangeNotifier {
 
   Future<bool> isAccessibilityServiceEnabled() async {
     try {
-      return await _channel.invokeMethod<bool>('isAccessibilityServiceEnabled') ?? false;
+      return await _channel.invokeMethod<bool>(
+            'isAccessibilityServiceEnabled',
+          ) ??
+          false;
     } catch (_) {
       return false;
     }

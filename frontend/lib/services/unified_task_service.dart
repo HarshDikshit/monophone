@@ -5,7 +5,7 @@ import 'task_planner_service.dart';
 import 'launcher_state.dart';
 
 /// A unified task bridge that synchronizes task data between:
-///   - Pomodoro engine (LauncherState._tasks)
+///   - Focus engine (LauncherState._tasks)
 ///   - Day Planner engine (TaskPlannerService._tasks)
 ///
 /// This ensures tasks created in either screen are visible in both.
@@ -13,7 +13,7 @@ class UnifiedTaskService extends ChangeNotifier {
   static const _bridgeStorageKey = 'unified_task_bridge';
   static UnifiedTaskService? _instance;
 
-  /// Bridge tasks: enriched copies that carry both planner and pomodoro fields.
+  /// Bridge tasks: enriched copies that carry both planner and focus fields.
   List<Map<String, dynamic>> _bridgeTasks = [];
   List<Map<String, dynamic>> get bridgeTasks => List.unmodifiable(_bridgeTasks);
 
@@ -68,10 +68,8 @@ class UnifiedTaskService extends ChangeNotifier {
           merged['durationMinutes'] = pt.durationMinutes;
           merged['startTime'] = pt.startTime.toIso8601String();
           merged['tag'] = pt.tag.name;
-          merged['estimatedPomodoros'] = pt.estimatedPomodoros;
         } else {
           merged['durationMinutes'] = lt['durationMinutes'] ?? 60;
-          merged['estimatedPomodoros'] = lt['estimatedPomodoros'] ?? 1;
         }
         bridgeMap[id] = merged;
       }
@@ -86,13 +84,10 @@ class UnifiedTaskService extends ChangeNotifier {
         bridgeMap[id]!['durationMinutes'] = pt.durationMinutes;
         bridgeMap[id]!['startTime'] = pt.startTime.toIso8601String();
         bridgeMap[id]!['tag'] = pt.tag.name;
-        bridgeMap[id]!['estimatedPomodoros'] = pt.estimatedPomodoros;
         bridgeMap[id]!['isRecurring'] = pt.isRecurring;
         bridgeMap[id]!['isCompleted'] = pt.isCompleted;
         bridgeMap[id]!['focusSeconds'] =
             (bridgeMap[id]!['focusSeconds'] ?? 0) + pt.focusSeconds;
-        bridgeMap[id]!['completedPomodoros'] =
-            (bridgeMap[id]!['completedPomodoros'] ?? 0) + pt.completedPomodoros;
       } else {
         // Check if launcher has it
         final launcherMatch = launcherTasks
@@ -106,11 +101,9 @@ class UnifiedTaskService extends ChangeNotifier {
             'durationMinutes': pt.durationMinutes,
             'startTime': pt.startTime.toIso8601String(),
             'tag': pt.tag.name,
-            'estimatedPomodoros': pt.estimatedPomodoros,
             'isRecurring': pt.isRecurring,
             'isCompleted': pt.isCompleted,
             'focusSeconds': pt.focusSeconds,
-            'completedPomodoros': pt.completedPomodoros,
             'isDone': pt.isCompleted,
             'createdAt': DateTime.now().toIso8601String(),
           };
@@ -127,7 +120,6 @@ class UnifiedTaskService extends ChangeNotifier {
     required String title,
     String description = '',
     bool isRecurring = false,
-    int estimatedPomodoros = 1,
     int durationMinutes = 60,
     DateTime? startTime,
   }) async {
@@ -135,11 +127,11 @@ class UnifiedTaskService extends ChangeNotifier {
     final now = DateTime.now();
     final st = startTime ?? now;
 
-    // Add to LauncherState (pomodoro side)
+    // Add to LauncherState
     await _launcherState?.addTask(
       title,
       isRecurring: isRecurring,
-      estimatedPomodoros: estimatedPomodoros,
+      durationMinutes: durationMinutes,
     );
 
     // Add to TaskPlannerService (planner side)
@@ -149,7 +141,6 @@ class UnifiedTaskService extends ChangeNotifier {
       description: description,
       startTime: st,
       durationMinutes: durationMinutes,
-      estimatedPomodoros: estimatedPomodoros,
       isRecurring: isRecurring,
     );
     await _plannerService?.addTask(plannerTask);

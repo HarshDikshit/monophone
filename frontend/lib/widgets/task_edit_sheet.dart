@@ -5,14 +5,14 @@ class TaskEditSheet extends StatefulWidget {
   final TimeBlockTask? existing;
   final DateTime initialDate;
   final TaskPlannerService planner;
-  final int pomoDurationMins;
+  final int initialDurationMins;
 
   const TaskEditSheet({
     super.key,
     this.existing,
     required this.initialDate,
     required this.planner,
-    this.pomoDurationMins = 25,
+    this.initialDurationMins = 25,
   });
 
   @override
@@ -24,26 +24,30 @@ class _TaskEditSheetState extends State<TaskEditSheet> {
   late TextEditingController descCtrl;
   late TaskTag selectedTag;
   late DateTime selectedTime;
-  late int pomoDurationMins;
-  late int estPomodoros;
+  late int durationMins;
   late bool isAlarmEnabled;
   late bool isRecurring;
   late List<int> recurringDays;
   bool allowOverlap = false;
 
+  // HH:MM duration editing
+  late int _durationHours;
+  late int _durationMinutes;
+
   @override
   void initState() {
     super.initState();
     final existing = widget.existing;
-    pomoDurationMins = widget.pomoDurationMins;
     titleCtrl = TextEditingController(text: existing?.title ?? '');
     descCtrl = TextEditingController(text: existing?.description ?? '');
     selectedTag = existing?.tag ?? TaskTag.general;
     selectedTime = existing?.startTime ?? widget.initialDate;
-    estPomodoros = existing?.estimatedPomodoros ?? 1;
+    durationMins = existing?.durationMinutes ?? widget.initialDurationMins;
     isAlarmEnabled = existing?.isAlarmEnabled ?? true;
     isRecurring = existing?.isRecurring ?? false;
     recurringDays = List.from(existing?.recurringDays ?? [1, 2, 3, 4, 5, 6, 7]);
+    _durationHours = durationMins ~/ 60;
+    _durationMinutes = durationMins % 60;
   }
 
   @override
@@ -53,10 +57,19 @@ class _TaskEditSheetState extends State<TaskEditSheet> {
     super.dispose();
   }
 
+  void _syncDuration() {
+    durationMins = _durationHours * 60 + _durationMinutes;
+    if (durationMins < 1) {
+      durationMins = 1;
+      _durationHours = 0;
+      _durationMinutes = 1;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final totalDurationMins = estPomodoros * pomoDurationMins;
-    final endTime = selectedTime.add(Duration(minutes: totalDurationMins));
+    _syncDuration();
+    final endTime = selectedTime.add(Duration(minutes: durationMins));
     final endStr =
         '${endTime.hour.toString().padLeft(2, '0')}:${endTime.minute.toString().padLeft(2, '0')}';
 
@@ -183,34 +196,225 @@ class _TaskEditSheetState extends State<TaskEditSheet> {
               const SizedBox(height: 20),
               _buildTimeSection(),
               const SizedBox(height: 12),
-              _infoField('POMODORO DURATION', '$pomoDurationMins min', () {
-                _showNumberPicker(
-                  'Pomodoro duration',
-                  pomoDurationMins,
-                  5,
-                  120,
-                  (v) {
-                    setState(() => pomoDurationMins = v);
-                  },
-                );
-              }),
+              _buildDurationSelector(),
               const SizedBox(height: 12),
-              _infoField('ESTIMATED POMODOROS', '$estPomodoros 🍅', () {
-                _showNumberPicker('Estimated Pomodoros', estPomodoros, 1, 99, (
-                  v,
-                ) {
-                  setState(() => estPomodoros = v);
-                });
-              }),
-              const SizedBox(height: 12),
-              _buildDurationSummary(totalDurationMins, endStr),
+              _buildDurationSummary(durationMins, endStr),
               const SizedBox(height: 12),
               _buildAlarmToggle(),
               const SizedBox(height: 20),
               _buildRecurringToggle(),
               const SizedBox(height: 24),
-              _buildActionButtons(totalDurationMins),
+              _buildActionButtons(durationMins),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDurationSelector() {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(border: Border.all(color: Colors.white10)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'FOCUS DURATION (HH:MM)',
+            style: TextStyle(
+              color: Colors.white38,
+              fontFamily: 'monospace',
+              fontSize: 9,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              // HOURS selector
+              Expanded(
+                child: Column(
+                  children: [
+                    GestureDetector(
+                      onTap: () => setState(() {
+                        _durationHours = (_durationHours + 1) % 24;
+                      }),
+                      child: const Icon(
+                        Icons.keyboard_arrow_up,
+                        color: Colors.white38,
+                        size: 20,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    GestureDetector(
+                      onTap: () => _showNumberPicker(
+                        'Hours',
+                        _durationHours,
+                        0,
+                        23,
+                        (v) => setState(() => _durationHours = v),
+                      ),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          vertical: 8,
+                          horizontal: 16,
+                        ),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.white24),
+                        ),
+                        child: Text(
+                          _durationHours.toString().padLeft(2, '0'),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontFamily: 'monospace',
+                            fontSize: 28,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    GestureDetector(
+                      onTap: () => setState(() {
+                        _durationHours = (_durationHours - 1 + 24) % 24;
+                      }),
+                      child: const Icon(
+                        Icons.keyboard_arrow_down,
+                        color: Colors.white38,
+                        size: 20,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    const Text(
+                      'HOURS',
+                      style: TextStyle(
+                        color: Colors.white24,
+                        fontFamily: 'monospace',
+                        fontSize: 8,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 8),
+                child: Text(
+                  ':',
+                  style: TextStyle(
+                    color: Colors.white38,
+                    fontSize: 28,
+                    fontWeight: FontWeight.bold,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+              ),
+              // MINUTES selector
+              Expanded(
+                child: Column(
+                  children: [
+                    GestureDetector(
+                      onTap: () => setState(() {
+                        _durationMinutes = (_durationMinutes + 5) % 60;
+                      }),
+                      child: const Icon(
+                        Icons.keyboard_arrow_up,
+                        color: Colors.white38,
+                        size: 20,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    GestureDetector(
+                      onTap: () => _showNumberPicker(
+                        'Minutes',
+                        _durationMinutes,
+                        0,
+                        55,
+                        (v) => setState(() => _durationMinutes = v),
+                      ),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          vertical: 8,
+                          horizontal: 16,
+                        ),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.white24),
+                        ),
+                        child: Text(
+                          _durationMinutes.toString().padLeft(2, '0'),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontFamily: 'monospace',
+                            fontSize: 28,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    GestureDetector(
+                      onTap: () => setState(() {
+                        _durationMinutes = (_durationMinutes - 5 + 60) % 60;
+                      }),
+                      child: const Icon(
+                        Icons.keyboard_arrow_down,
+                        color: Colors.white38,
+                        size: 20,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    const Text(
+                      'MINS',
+                      style: TextStyle(
+                        color: Colors.white24,
+                        fontFamily: 'monospace',
+                        fontSize: 8,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          // Quick preset buttons
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              _presetChip('15m', 0, 15),
+              _presetChip('30m', 0, 30),
+              _presetChip('45m', 0, 45),
+              _presetChip('1h', 1, 0),
+              _presetChip('1.5h', 1, 30),
+              _presetChip('2h', 2, 0),
+              _presetChip('3h', 3, 0),
+              _presetChip('4h', 4, 0),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _presetChip(String label, int h, int m) {
+    final active = _durationHours == h && _durationMinutes == m;
+    return GestureDetector(
+      onTap: () => setState(() {
+        _durationHours = h;
+        _durationMinutes = m;
+      }),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          border: Border.all(color: active ? Colors.white : Colors.white12),
+          color: active ? Colors.white.withOpacity(0.1) : Colors.transparent,
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: active ? Colors.white : Colors.white38,
+            fontFamily: 'monospace',
+            fontSize: 9,
+            fontWeight: active ? FontWeight.bold : FontWeight.normal,
           ),
         ),
       ),
@@ -344,13 +548,16 @@ class _TaskEditSheetState extends State<TaskEditSheet> {
   }
 
   Widget _buildDurationSummary(int totalMinutes, String endStr) {
+    final h = totalMinutes ~/ 60;
+    final m = totalMinutes % 60;
+    final displayStr = h > 0 ? '${h}h ${m}m' : '${m}m';
     return Container(
       padding: const EdgeInsets.all(12),
       color: Colors.white.withOpacity(0.02),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          _summaryCol('TOTAL DURATION', '$totalMinutes min'),
+          _summaryCol('FOCUS DURATION', displayStr),
           _summaryCol('END TIME', endStr),
         ],
       ),
@@ -470,12 +677,10 @@ class _TaskEditSheetState extends State<TaskEditSheet> {
                 description: descCtrl.text,
                 tag: selectedTag,
                 startTime: selectedTime,
-                durationMinutes: totalDurationMins,
-                estimatedPomodoros: estPomodoros,
+                durationMinutes: durationMins,
                 isRecurring: isRecurring,
                 recurringDays: isRecurring ? recurringDays : [],
                 focusSeconds: widget.existing?.focusSeconds ?? 0,
-                completedPomodoros: widget.existing?.completedPomodoros ?? 0,
                 isCompleted: widget.existing?.isCompleted ?? false,
                 isAlarmEnabled: isAlarmEnabled,
               );

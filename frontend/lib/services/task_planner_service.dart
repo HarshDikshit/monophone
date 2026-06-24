@@ -55,14 +55,17 @@ class TimeBlockTask {
   TaskTag tag;
   DateTime startTime;
   int durationMinutes;
-  int estimatedPomodoros;
   bool isRecurring;
   List<int> recurringDays; // days of week (1=Mon..7=Sun)
   bool isCompleted;
   bool isAlarmEnabled;
   int focusSeconds;
-  int completedPomodoros;
   DateTime? completedAt;
+
+  // Legacy aliases for Pomodoro backward compatibility
+  int get completedPomodoros => (focusSeconds / (25 * 60)).floor();
+  int get estimatedPomodoros => (durationMinutes / 25).ceil();
+  int get pomodoroDurationMinutes => 25;
 
   DateTime get endTime => startTime.add(Duration(minutes: durationMinutes));
   String get timeSlotString =>
@@ -76,13 +79,11 @@ class TimeBlockTask {
     this.tag = TaskTag.general,
     required this.startTime,
     this.durationMinutes = 60,
-    this.estimatedPomodoros = 2,
     this.isRecurring = false,
     this.recurringDays = const [],
     this.isCompleted = false,
     this.isAlarmEnabled = true,
     this.focusSeconds = 0,
-    this.completedPomodoros = 0,
     this.completedAt,
   });
 
@@ -93,13 +94,11 @@ class TimeBlockTask {
     'tag': tag.name,
     'startTime': startTime.toIso8601String(),
     'durationMinutes': durationMinutes,
-    'estimatedPomodoros': estimatedPomodoros,
     'isRecurring': isRecurring,
     'recurringDays': recurringDays,
     'isCompleted': isCompleted,
     'isAlarmEnabled': isAlarmEnabled,
     'focusSeconds': focusSeconds,
-    'completedPomodoros': completedPomodoros,
     'completedAt': completedAt?.toIso8601String(),
   };
 
@@ -113,13 +112,11 @@ class TimeBlockTask {
     ),
     startTime: DateTime.parse(json['startTime'] as String),
     durationMinutes: json['durationMinutes'] as int? ?? 60,
-    estimatedPomodoros: json['estimatedPomodoros'] as int? ?? 2,
     isRecurring: json['isRecurring'] as bool? ?? false,
     recurringDays: List<int>.from(json['recurringDays'] as List? ?? []),
     isCompleted: json['isCompleted'] as bool? ?? false,
     isAlarmEnabled: json['isAlarmEnabled'] as bool? ?? true,
     focusSeconds: json['focusSeconds'] as int? ?? 0,
-    completedPomodoros: json['completedPomodoros'] as int? ?? 0,
     completedAt: json['completedAt'] != null
         ? DateTime.parse(json['completedAt'] as String)
         : null,
@@ -132,13 +129,11 @@ class TimeBlockTask {
     TaskTag? tag,
     DateTime? startTime,
     int? durationMinutes,
-    int? estimatedPomodoros,
     bool? isRecurring,
     List<int>? recurringDays,
     bool? isCompleted,
     bool? isAlarmEnabled,
     int? focusSeconds,
-    int? completedPomodoros,
   }) => TimeBlockTask(
     id: id ?? this.id,
     title: title ?? this.title,
@@ -146,13 +141,11 @@ class TimeBlockTask {
     tag: tag ?? this.tag,
     startTime: startTime ?? this.startTime,
     durationMinutes: durationMinutes ?? this.durationMinutes,
-    estimatedPomodoros: estimatedPomodoros ?? this.estimatedPomodoros,
     isRecurring: isRecurring ?? this.isRecurring,
     recurringDays: recurringDays ?? this.recurringDays,
     isCompleted: isCompleted ?? this.isCompleted,
     isAlarmEnabled: isAlarmEnabled ?? this.isAlarmEnabled,
     focusSeconds: focusSeconds ?? this.focusSeconds,
-    completedPomodoros: completedPomodoros ?? this.completedPomodoros,
     completedAt: completedAt ?? this.completedAt,
   );
 }
@@ -160,14 +153,13 @@ class TimeBlockTask {
 /// Manages time-block tasks with persistence, reminders, and recurrence
 class TaskPlannerService extends ChangeNotifier {
   static const _storageKey = 'time_block_tasks';
-  static const _pomodoroDurationKey = 'planner_pomodoro_duration';
   static const _channel = MethodChannel('com.dixit.monophone/launcher');
 
   List<TimeBlockTask> _tasks = [];
   List<TimeBlockTask> get tasks => List.unmodifiable(_tasks);
 
-  int _pomodoroDuration = 25;
-  int get pomodoroDuration => _pomodoroDuration;
+  // Legacy alias for Pomodoro backward compatibility
+  int get pomodoroDuration => 25;
 
   /// Get task by ID
   TimeBlockTask? getTaskById(String id) {
@@ -239,7 +231,6 @@ class TaskPlannerService extends ChangeNotifier {
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_storageKey);
-    _pomodoroDuration = prefs.getInt(_pomodoroDurationKey) ?? 25;
     if (raw != null && raw.isNotEmpty) {
       try {
         final list = jsonDecode(raw) as List<dynamic>;
@@ -260,7 +251,6 @@ class TaskPlannerService extends ChangeNotifier {
       _storageKey,
       jsonEncode(_tasks.map((t) => t.toJson()).toList()),
     );
-    await prefs.setInt(_pomodoroDurationKey, _pomodoroDuration);
   }
 
   Future<void> addTask(TimeBlockTask task) async {
@@ -296,29 +286,17 @@ class TaskPlannerService extends ChangeNotifier {
     }
   }
 
-  Future<void> addFocusSeconds(String id, int seconds) async {
+  Future<void> addFocusSeconds(String id, int seconds, {bool persist = true}) async {
     final idx = _tasks.indexWhere((t) => t.id == id);
     if (idx >= 0) {
       _tasks[idx].focusSeconds += seconds;
-      await _persist();
+      if (persist) {
+        await _persist();
+      }
       notifyListeners();
     }
   }
 
-  Future<void> incrementPomodoro(String id) async {
-    final idx = _tasks.indexWhere((t) => t.id == id);
-    if (idx >= 0) {
-      _tasks[idx].completedPomodoros += 1;
-      await _persist();
-      notifyListeners();
-    }
-  }
-
-  Future<void> setPomodoroDuration(int minutes) async {
-    _pomodoroDuration = minutes.clamp(5, 120);
-    await _persist();
-    notifyListeners();
-  }
 
   Future<void> scheduleReminders(List<TimeBlockTask> tasks) async {
     for (final task in tasks) {
