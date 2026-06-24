@@ -217,14 +217,27 @@ class FocusAccessibilityService : AccessibilityService() {
                 
                 if (packageName.contains("instagram")) {
                     // Instagram Reels signal: 
-                    // - "Reels" text at the top (usually a Tab title or header)
-                    // - "Use template" or "Remix this reel"
-                    val isReelsTab = allContent.contains("use template") || allContent.contains("remix this reel")
-                    val isHomeFeed = allContent.contains("suggested for you") || allContent.contains("search and explore")
+                    // - "Reels" or "Friends" headers at the top
+                    // - "Use template", "Remix this reel", or "Original audio"
+                    // - Vertical interaction bar (Like, Comment, Share icons without horizontal spacing of the feed)
+                    val isReelicSignal = allContent.contains("use template") || 
+                                        allContent.contains("remix this reel") || 
+                                        allContent.contains("audio") || // "Original audio" is very common
+                                        allContent.startsWith("reels") // The header
                     
-                    if (isHomeFeed && !allContent.contains("use template")) return false
+                    // Home feed often has "Follow" or specific feed headers.
+                    val isHomeFeedMarker = allContent.contains("suggested for you") || 
+                                         allContent.contains("search and explore") ||
+                                         allContent.contains("camera")
                     
-                    return isReelsTab
+                    // If we clearly see a Reels tab header/signal, it's a Reel.
+                    // Image 4/5 show "Reels   Friends" at the top.
+                    val isInReelsTab = allContent.contains("reels") && (allContent.contains("friends") || allContent.contains("follow")) && 
+                                      (allContent.contains("audio") || allContent.contains("template"))
+                    
+                    if (isHomeFeedMarker && !isInReelsTab) return false
+                    
+                    return isReelicSignal || isInReelsTab
                 }
                 
                 if (packageName.contains("tiktok")) return true
