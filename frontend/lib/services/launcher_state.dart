@@ -8,9 +8,14 @@ import 'api_service.dart';
 import 'blocker_service.dart';
 import 'offline_sync_service.dart';
 import 'task_planner_service.dart';
+import '../widgets/battery_dialog.dart';
 
 class LauncherState extends ChangeNotifier {
   static const _channel = MethodChannel('com.dixit.monophone/launcher');
+
+  /// Global navigator key for showing dialogs from services without context.
+  /// Set this in the MaterialApp constructor.
+  static final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
   // Timer mode: 'countdown' or 'countup'
   String _timerMode = 'countdown';
@@ -915,6 +920,14 @@ class LauncherState extends ChangeNotifier {
       return;
     }
 
+    // Demand battery unrestricted mode via a sweet, clear dialog.
+    // The user must manually set it or explicitly choose to continue without it.
+    final batteryOk = await BatteryOptimizationDialog.showIfNeeded();
+    
+    if (!batteryOk) {
+      // User chose "Continue anyway" - allow them to proceed
+    }
+    
     await checkBatteryOptimizationStatus();
     if (!_isBatteryOptimizationIgnored) {
       _showBatteryPrompt = true;
