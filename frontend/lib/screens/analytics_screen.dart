@@ -732,8 +732,9 @@ String _fmtHM(int s) {
 String _fmtHMD(int s) {
   if (s <= 0) return '0';
   final h = s / 3600.0;
+  if (h >= 10) return h.toStringAsFixed(0);
   if (h >= 1) return h.toStringAsFixed(1).replaceAll(RegExp(r'\.0$'), '');
-  return ((s / 3600.0) * 10).round().toString();
+  return h.toStringAsFixed(1);
 }
 
 // ── Navigation Bar ──────────────────────────────────────────────────
