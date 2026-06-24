@@ -197,15 +197,18 @@ class MainActivity : FlutterActivity() {
                         ?.toSet() ?: emptySet()
                     val emergencyUseMaxCounts = call.argument<HashMap<String, Int>>("emergencyUseMaxCounts")
                         ?: hashMapOf()
+                    val shortsBlockEnabledPackages = call.argument<List<String>>("shortsBlockEnabledPackages")?.toSet()
+                        ?: emptySet()
 
-                    Log.d("MainActivity", "configureBlockingRules: packages=${blockedPackages.size}, limits=${dailyLimits.size}, allowOne=${allowOneShort.size}")
+                    Log.d("MainActivity", "configureBlockingRules: packages=${blockedPackages.size}, limits=${dailyLimits.size}, allowOne=${allowOneShort.size}, shortsBlock=${shortsBlockEnabledPackages.size}")
 
                     BlockerConfig.updateFromFlutter(
                         blockedPackages = blockedPackages,
                         dailyLimits = dailyLimits,
                         allowOneShort = allowOneShort,
                         restrictedKeywords = restrictedKeywords,
-                        emergencyUseMaxCounts = emergencyUseMaxCounts
+                        emergencyUseMaxCounts = emergencyUseMaxCounts,
+                        shortsBlockEnabledPackages = shortsBlockEnabledPackages
                     )
                     result.success(true)
                 }

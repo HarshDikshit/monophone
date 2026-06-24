@@ -59,6 +59,8 @@ class PomodoroOverlayService : Service() {
     var secondsRemaining = 25 * 60
     var totalDurationSeconds = 25 * 60
     var taskName = "Focus Block"
+    var taskId: String? = null
+    var completedPomodoros = 0
     var timerMode = "countdown" // "countdown" or "countup"
     
     private val handler = Handler(Looper.getMainLooper())
@@ -119,6 +121,8 @@ class PomodoroOverlayService : Service() {
         when (intent?.action) {
             ACTION_START -> {
                 taskName = intent.getStringExtra("taskName") ?: "Focus Block"
+                taskId = intent.getStringExtra("taskId")
+                completedPomodoros = intent.getIntExtra("completedPomodoros", 0)
                 val duration = intent.getIntExtra("durationSeconds", 25 * 60)
                 timerMode = intent.getStringExtra("timerMode") ?: "countdown"
                 totalDurationSeconds = duration
@@ -148,10 +152,10 @@ class PomodoroOverlayService : Service() {
                 notifyStateChanged()
             }
             ACTION_STOP -> {
-                stopPomodoro()
+                stopPomodoro(manual = true)
             }
             ACTION_SKIP_BREAK -> {
-                stopPomodoro()
+                stopPomodoro(manual = true)
             }
         }
         return START_NOT_STICKY
@@ -228,10 +232,10 @@ class PomodoroOverlayService : Service() {
         // Always stop on completion — let Flutter side handle auto-start/break logic.
         // This prevents double-trigger races with the Dart auto-start handlers
         // and ensures the correct task name & duration are used.
-        stopPomodoro()
+        stopPomodoro(manual = false)
     }
 
-    private fun stopPomodoro() {
+    private fun stopPomodoro(manual: Boolean) {
         isRunning = false
         isPaused = false
         val elapsedSeconds = if (!isBreak) {
@@ -245,7 +249,9 @@ class PomodoroOverlayService : Service() {
             "isBreak" to isBreak,
             "isPaused" to false,
             "taskName" to taskName,
-            "elapsedSeconds" to elapsedSeconds
+            "taskId" to taskId,
+            "elapsedSeconds" to elapsedSeconds,
+            "manual" to manual
         )
         handler.post {
             try {
@@ -278,7 +284,9 @@ class PomodoroOverlayService : Service() {
             "isBreak" to isBreak,
             "isPaused" to isPaused,
             "taskName" to taskName,
-            "elapsedSeconds" to elapsed
+            "taskId" to taskId,
+            "elapsedSeconds" to elapsed,
+            "completedPomodoros" to completedPomodoros
         )
         try {
             MainActivity.channel?.invokeMethod("onPomodoroStateChanged", arguments)
@@ -418,7 +426,7 @@ class PomodoroOverlayService : Service() {
                     leftMargin = (4 * dp).toInt()
                 }
                 setOnClickListener {
-                    stopPomodoro()
+                    stopPomodoro(manual = true)
                 }
             }
             btnRow.addView(expStopBtn)
@@ -517,7 +525,9 @@ class PomodoroOverlayService : Service() {
         
         shrunkText.text = "[$timeStr]"
         
-        expHeader.text = if (isBreak) "BREAK TIME" else if (timerMode == "countup") "∞ COUNT UP" else "FOCUSING"
+        expHeader.text = if (isBreak) "BREAK TIME" else if (timerMode == "countup") "∞ COUNT UP" else {
+            if (completedPomodoros > 0) "FOCUSING (#${completedPomodoros + 1})" else "FOCUSING"
+        }
         expTaskText.text = taskName
         expTimeText.text = timeStr
         
@@ -564,7 +574,7 @@ class PomodoroOverlayService : Service() {
         val timeStr = String.format("%02d:%02d", minutes, seconds)
 
         // Task title and status
-        val statusText = if (isBreak) "BREAK TIME" else "KEEP FOCUSING"
+        val statusText = if (isBreak) "BREAK TIME" else if (completedPomodoros > 0) "POMODORO #${completedPomodoros + 1}" else "KEEP FOCUSING"
         val displayTaskName = if (isBreak) "Break Time" else taskName
 
         remoteViews.setTextViewText(R.id.task_title, displayTaskName.uppercase())

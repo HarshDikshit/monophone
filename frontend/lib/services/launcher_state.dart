@@ -236,6 +236,11 @@ class LauncherState extends ChangeNotifier {
             final bool wasBreak = _isBreak;
 
             await _commitPomodoroProgress(sync: true);
+            
+            final bool wasManualStop = call.arguments['manual'] ?? false;
+            if (wasManualStop) {
+              _isManuallyStopped = true;
+            }
 
             // Only auto-start next if NOT manually stopped
             if (!_isManuallyStopped) {
@@ -291,6 +296,7 @@ class LauncherState extends ChangeNotifier {
             // Otherwise keep the correct task name we set via switchActiveTask()
             if (_activeTaskId == null && task.isNotEmpty) {
               _lastGoal = task;
+              _activeTaskId = call.arguments['taskId'];
             }
             _lastTaskActivityTime = DateTime.now();
             if (!_isBreak) {
@@ -424,6 +430,7 @@ class LauncherState extends ChangeNotifier {
         _pomodoroSecondsRemaining = nativeState['secondsRemaining'] ?? 0;
         _isBreak = nativeState['isBreak'] ?? false;
         _lastGoal = nativeState['taskName'] ?? _lastGoal;
+        _activeTaskId = nativeState['taskId'] ?? _activeTaskId;
         _timerMode = nativeState['timerMode'] ?? _timerMode;
       }
     } catch (_) {}
@@ -996,6 +1003,14 @@ class LauncherState extends ChangeNotifier {
       return;
     }
 
+    // Check battery optimization
+    await checkBatteryOptimizationStatus();
+    if (!_isBatteryOptimizationIgnored) {
+      _showBatteryPrompt = true;
+      notifyListeners();
+      return;
+    }
+
     _isPomodoroActive = true;
     _isBreak = false;
     _isManuallyStopped = false;
@@ -1003,11 +1018,15 @@ class LauncherState extends ChangeNotifier {
     // Use the active task's custom pomodoro duration if available,
     // otherwise fall back to the global custom duration.
     int durationSeconds = _customDurationSeconds;
+    int completedPomodoros = 0;
     if (_activeTaskId != null && _plannerService != null) {
       final task = _plannerService!.getTaskById(_activeTaskId!);
-      if (task != null && task.pomodoroDurationMinutes > 0) {
-        durationSeconds = task.pomodoroDurationMinutes * 60;
-        _pomodoroTaskDurationSeconds = durationSeconds;
+      if (task != null) {
+        completedPomodoros = task.completedPomodoros;
+        if (task.pomodoroDurationMinutes > 0) {
+          durationSeconds = task.pomodoroDurationMinutes * 60;
+          _pomodoroTaskDurationSeconds = durationSeconds;
+        }
       }
     }
 
@@ -1028,6 +1047,8 @@ class LauncherState extends ChangeNotifier {
 
     await _channel.invokeMethod('startPomodoro', {
       'taskName': _lastGoal.isNotEmpty ? _lastGoal : "Focus Session",
+      'taskId': _activeTaskId,
+      'completedPomodoros': completedPomodoros,
       'durationSeconds': durationSeconds,
       'isBreak': false,
       'timerMode': _timerMode,
@@ -1050,6 +1071,7 @@ class LauncherState extends ChangeNotifier {
 
     await _channel.invokeMethod('startPomodoro', {
       'taskName': "Break Time",
+      'taskId': _activeTaskId,
       'durationSeconds': 5 * 60,
       'isBreak': true,
       'timerMode': 'countdown',
@@ -1285,6 +1307,7 @@ class LauncherState extends ChangeNotifier {
     required Map<String, bool> allowOneShort,
     required Set<String> restrictedKeywords,
     Map<String, int>? emergencyUseMaxCounts,
+    List<String> shortsBlockEnabledPackages = const [],
   }) async {
     try {
       await _channel.invokeMethod('configureBlockingRules', {
@@ -1293,6 +1316,7 @@ class LauncherState extends ChangeNotifier {
         'allowOneShort': allowOneShort,
         'restrictedKeywords': restrictedKeywords.toList(),
         'emergencyUseMaxCounts': emergencyUseMaxCounts ?? <String, int>{},
+        'shortsBlockEnabledPackages': shortsBlockEnabledPackages,
       });
     } catch (e) {
       debugPrint("Failed to configure blocking rules: $e");
@@ -1769,12 +1793,30 @@ class LauncherState extends ChangeNotifier {
       }
     });
 
+    // Build list of packages for Reels/Shorts blocker specifically
+    final shortsBlockEnabledPackages = <String>[];
+    if (blockYoutubeShorts) {
+      for (final app in _allApps) {
+        if ((app['name'] ?? '').toLowerCase().contains('youtube')) {
+          shortsBlockEnabledPackages.add(app['packageName']!);
+        }
+      }
+    }
+    if (blockInstagramReels) {
+      for (final app in _allApps) {
+        if ((app['name'] ?? '').toLowerCase().contains('instagram')) {
+          shortsBlockEnabledPackages.add(app['packageName']!);
+        }
+      }
+    }
+
     await configureBlockingRules(
       blockedPackages: blockedPackageNames,
       dailyLimits: dailyLimitsMap,
       allowOneShort: allowOneShortMap,
       restrictedKeywords: restrictedKeywords.toSet(),
       emergencyUseMaxCounts: emergencyUseMaxMap,
+      shortsBlockEnabledPackages: shortsBlockEnabledPackages,
     );
 
     // Restart daily monitoring to apply new limits

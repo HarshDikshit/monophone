@@ -79,7 +79,10 @@ class FocusAccessibilityService : AccessibilityService() {
             lastBlockTime.clear()
         }
 
-        if (BlockerConfig.blockedPackages.contains(packageName)) {
+        val isShortsBlockActive = BlockerConfig.isShortsBlockEnabled(packageName)
+        val isAppFullyBlocked = BlockerConfig.blockedPackages.contains(packageName)
+
+        if (isShortsBlockActive || isAppFullyBlocked) {
             if (isReelsShortsPackage(packageName)) {
                 if (BlockerOverlayService.isCurrentlyShowing) return
 
@@ -94,13 +97,19 @@ class FocusAccessibilityService : AccessibilityService() {
                 }
 
                 lastScanTime[packageName] = now
-                scanForReelsShorts(packageName, event)
-                return
+                if (isShortsBlockActive) {
+                    Log.v(TAG, "Scanning for Reels/Shorts content in $packageName")
+                    scanForReelsShorts(packageName, event)
+                } else {
+                    Log.v(TAG, "Shorts block disabled for $packageName, skipping scan.")
+                }
             }
 
-            val isLimitExceeded = UsageTracker.isLimitExceeded(packageName)
-            if (isLimitExceeded) {
-                triggerBlockerOverlay(packageName, "Daily usage limit exceeded")
+            if (isAppFullyBlocked) {
+                val isLimitExceeded = UsageTracker.isLimitExceeded(packageName)
+                if (isLimitExceeded) {
+                    triggerBlockerOverlay(packageName, "Daily usage limit exceeded")
+                }
             }
         }
     }
@@ -169,7 +178,6 @@ class FocusAccessibilityService : AccessibilityService() {
                 lastBlockTime[packageName] = now
             }
         } else if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            // Reset the feed session if user really navigates away.
             Log.d(TAG, "Navigation away from $packageName — resetting feed timer.")
             feedStartTime.remove(packageName)
             BlockerConfig.clearFirstReelAcknowledged(packageName)
@@ -177,35 +185,71 @@ class FocusAccessibilityService : AccessibilityService() {
     }
 
     private fun checkIfInShortsFeed(packageName: String, event: AccessibilityEvent): Boolean {
-        var root = rootInActiveWindow ?: event.source
+        val root = rootInActiveWindow ?: event.source
         if (root != null) {
             try {
-                val text = extractAllVisibleText(root).lowercase(java.util.Locale.US)
+                val nodes = extractAllVisibleNodes(root)
+                val allContent = nodes.joinToString("\n") { "${it.first} ${it.second}" }.lowercase(java.util.Locale.US)
+                
                 if (packageName.contains("youtube")) {
-                    if (text.contains("dislike") || text.contains("remix")) return true
-                    if (text.contains("home") && text.contains("subscriptions")) return false
+                    // Signal 1: The official YouTube Shorts player view or specific unique vertical overlay buttons.
+                    // The 'dislike' button + 'remix' or 'share' in the vertical player is a very strong signal.
+                    // Shorts player buttons usually have content descriptions like "dislike this video", "remix this video".
+                    val hasShortsButtons = allContent.contains("dislike") && (allContent.contains("remix") || allContent.contains("comments") || allContent.contains("share"))
+                    
+                    // Signal 2: Check for markers of the classic Home/Subscriptions feed.
+                    // Regular videos show views, time ago, and channel names on screen together.
+                    val viewsCount = allContent.split("views").size - 1
+                    val agoCount = allContent.split("ago").size - 1
+                    
+                    // If we see more than one regular video markers, we are almost certainly on a scrolling list (Home/Sub).
+                    val hasRegularVideoMarkers = (viewsCount >= 1 || agoCount >= 1)
+                    
+                    // False positive prevention: If we see main navigation tabs and regular video markers.
+                    if (hasRegularVideoMarkers && (allContent.contains("home") || allContent.contains("subscriptions"))) {
+                        // Log.v(TAG, "Home/Subscriptions feed detected (views=$viewsCount, ago=$agoCount) - skipping block.")
+                        return false
+                    }
+                    
+                    // Additional check: Shorts player is usually full screen, so we won't see view counts for NEXT/PREVIOUS videos in the scan.
+                    return hasShortsButtons && !hasRegularVideoMarkers
                 }
+                
                 if (packageName.contains("instagram")) {
-                    if (text.contains("reels tray container") || text.contains("original audio")) return false
-                    if ((text.contains("reels") && text.contains("friends")) || text.contains("use template") || text.contains("remix this reel")) return true
+                    // Instagram Reels signal: 
+                    // - "Reels" text at the top (usually a Tab title or header)
+                    // - "Use template" or "Remix this reel"
+                    val isReelsTab = allContent.contains("use template") || allContent.contains("remix this reel")
+                    val isHomeFeed = allContent.contains("suggested for you") || allContent.contains("search and explore")
+                    
+                    if (isHomeFeed && !allContent.contains("use template")) return false
+                    
+                    return isReelsTab
                 }
+                
+                if (packageName.contains("tiktok")) return true
+                if (packageName.contains("facebook") && allContent.contains("reels")) return true
+                
             } catch (_: Exception) {}
         }
         return false
     }
 
-    private fun extractAllVisibleText(node: AccessibilityNodeInfo): String {
-        val sb = StringBuilder()
+    private fun extractAllVisibleNodes(node: AccessibilityNodeInfo): List<Pair<String, String>> {
+        val list = mutableListOf<Pair<String, String>>()
         fun traverse(n: AccessibilityNodeInfo?) {
             if (n == null) return
             if (n.isVisibleToUser) {
-                n.text?.toString()?.takeIf { it.isNotEmpty() }?.let { sb.append(it).append("\n") }
-                n.contentDescription?.toString()?.takeIf { it.isNotEmpty() }?.let { sb.append(it).append("\n") }
+                val txt = n.text?.toString() ?: ""
+                val desc = n.contentDescription?.toString() ?: ""
+                if (txt.isNotEmpty() || desc.isNotEmpty()) {
+                    list.add(Pair(txt, desc))
+                }
             }
             for (i in 0 until n.childCount) traverse(n.getChild(i))
         }
         traverse(node)
-        return sb.toString()
+        return list
     }
 
     private fun triggerBlockerOverlay(packageName: String, reason: String) {
