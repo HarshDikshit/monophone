@@ -56,12 +56,16 @@ class LauncherState extends ChangeNotifier {
 
   // Pomodoro
   bool _isPomodoroActive = false;
+  bool _isPaused = false;
+  bool get isPaused => _isPaused;
+  bool _isManuallyStopped = false;
   bool _isBreak = false;
 
   /// COUNTDOWN: seconds remaining (counts down to 0)
   /// COUNTUP:   seconds elapsed (counts up from 0)
   int _pomodoroSecondsRemaining = 25 * 60;
   int _pomodoroTotalDurationSeconds = 25 * 60;
+  int _pomodoroTaskDurationSeconds = 0; // tracks the active task's custom duration for auto-start
   // Date key when the current pomodoro session started (for cross-day splitting)
   String _pomodoroSessionDateKey = '';
 
@@ -193,7 +197,8 @@ class LauncherState extends ChangeNotifier {
           final bool isBreakVal = call.arguments['isBreak'] ?? false;
           _isBreak = isBreakVal;
           // Each tick = 1 second of focus time. Track as pending.
-          if (_isPomodoroActive && !_isBreak) {
+          // Skip counting if paused — only count when actually running
+          if (_isPomodoroActive && !_isPaused && !_isBreak) {
             _checkMidnightReset();
             _pomodoroPendingFocusSeconds += 1;
             _pomodoroPendingTaskSeconds += 1;
@@ -219,36 +224,48 @@ class LauncherState extends ChangeNotifier {
           final String task = call.arguments['taskName'] ?? "";
 
           if (status == "STOPPED") {
+            // If we paused, don't commit progress or increment pomodoro
+            if (_isPaused) {
+              _isPomodoroActive = true; // Keep active for resume
+              notifyListeners();
+              break;
+            }
+
             final double sessionDuration = _pomodoroTotalDurationSeconds
                 .toDouble();
             final bool wasBreak = _isBreak;
 
             await _commitPomodoroProgress(sync: true);
 
-            if (!wasBreak) {
-              _incrementActiveTaskPomodoro();
-              // Logic Check: Pomodoro finished
-              if (_autoStartBreak) {
-                // Wait briefly then start break
-                Future.delayed(const Duration(milliseconds: 500), () {
-                  startBreak();
-                });
-              } else if (_autoStartNextPomodoro) {
-                // Skip break, start next pomodoro
-                Future.delayed(const Duration(milliseconds: 500), () {
-                  startPomodoro();
-                });
-              }
-            } else {
-              // Break finished
-              if (_autoStartNextPomodoro) {
-                Future.delayed(const Duration(milliseconds: 500), () {
-                  startPomodoro();
-                });
+            // Only auto-start next if NOT manually stopped
+            if (!_isManuallyStopped) {
+              if (!wasBreak) {
+                _incrementActiveTaskPomodoro();
+                // Logic Check: Pomodoro finished
+                if (_autoStartBreak) {
+                  // Wait briefly then start break
+                  Future.delayed(const Duration(milliseconds: 500), () {
+                    startBreak();
+                  });
+                } else if (_autoStartNextPomodoro) {
+                  // Skip break, start next pomodoro
+                  Future.delayed(const Duration(milliseconds: 500), () {
+                    startPomodoro();
+                  });
+                }
+              } else {
+                // Break finished
+                if (_autoStartNextPomodoro) {
+                  Future.delayed(const Duration(milliseconds: 500), () {
+                    startPomodoro();
+                  });
+                }
               }
             }
 
             _isPomodoroActive = false;
+            _isPaused = false;
+            _isManuallyStopped = false;
             _pomodoroTotalDurationSeconds = _customDurationSeconds;
             _pomodoroSessionDateKey = '';
 
@@ -270,7 +287,9 @@ class LauncherState extends ChangeNotifier {
             _isPomodoroActive = true;
             _isBreak = isBreakVal;
             _pomodoroSecondsRemaining = seconds;
-            if (task.isNotEmpty) {
+            // Only accept task name from native if we don't have an active task
+            // Otherwise keep the correct task name we set via switchActiveTask()
+            if (_activeTaskId == null && task.isNotEmpty) {
               _lastGoal = task;
             }
             _lastTaskActivityTime = DateTime.now();
@@ -979,13 +998,25 @@ class LauncherState extends ChangeNotifier {
 
     _isPomodoroActive = true;
     _isBreak = false;
+    _isManuallyStopped = false;
+
+    // Use the active task's custom pomodoro duration if available,
+    // otherwise fall back to the global custom duration.
+    int durationSeconds = _customDurationSeconds;
+    if (_activeTaskId != null && _plannerService != null) {
+      final task = _plannerService!.getTaskById(_activeTaskId!);
+      if (task != null && task.pomodoroDurationMinutes > 0) {
+        durationSeconds = task.pomodoroDurationMinutes * 60;
+        _pomodoroTaskDurationSeconds = durationSeconds;
+      }
+    }
 
     // COUNTDOWN: secondsRemaining starts at duration, counts down
     // COUNTUP:   secondsRemaining starts at 0, counts up (elapsed)
     _pomodoroSecondsRemaining = _timerMode == 'countdown'
-        ? _customDurationSeconds
+        ? durationSeconds
         : 0;
-    _pomodoroTotalDurationSeconds = _customDurationSeconds;
+    _pomodoroTotalDurationSeconds = durationSeconds;
     _pomodoroPendingFocusSeconds = 0;
     _pomodoroPendingTaskSeconds = 0;
     _pomodoroDirty = false;
@@ -997,7 +1028,7 @@ class LauncherState extends ChangeNotifier {
 
     await _channel.invokeMethod('startPomodoro', {
       'taskName': _lastGoal.isNotEmpty ? _lastGoal : "Focus Session",
-      'durationSeconds': _customDurationSeconds,
+      'durationSeconds': durationSeconds,
       'isBreak': false,
       'timerMode': _timerMode,
       'autoStartBreak': _autoStartBreak,
@@ -1043,6 +1074,8 @@ class LauncherState extends ChangeNotifier {
 
   void stopPomodoro({bool manual = false}) async {
     _isPomodoroActive = false;
+    _isPaused = false;
+    _isManuallyStopped = true;
 
     if (manual) {
       _autoStartNextPomodoro = false;
@@ -1060,21 +1093,21 @@ class LauncherState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Pause the pomodoro timer without committing progress or stopping monitoring.
+  /// Pause the pomodoro timer — freezes the timer & focus counting.
   /// Saves remaining seconds so resume can pick up from where it left off.
   void pausePomodoro() async {
     if (!_isPomodoroActive) return;
+
+    _isPaused = true;
 
     // Save remaining seconds before stopping native timer
     final savedSeconds = _pomodoroSecondsRemaining;
     final savedDuration = _pomodoroTotalDurationSeconds;
 
-    // Commit any pending progress before stopping
-    await _commitPomodoroProgress();
-
+    // Do NOT commit pending progress — pause should NOT count focus time
     await _channel.invokeMethod('stopPomodoro');
 
-    // Keep state true, just mark as not running
+    // Keep state, just mark as paused
     _pomodoroSecondsRemaining = savedSeconds;
     _pomodoroTotalDurationSeconds = savedDuration;
     notifyListeners();
@@ -1082,7 +1115,7 @@ class LauncherState extends ChangeNotifier {
 
   /// Resume a paused pomodoro timer from where it left off
   void resumePomodoro() async {
-    if (_isPomodoroActive) return; // already running
+    if (!_isPaused) return; // only resume from paused state
 
     final hasPermission = await checkUsagePermission();
     if (!hasPermission) {
@@ -1090,7 +1123,7 @@ class LauncherState extends ChangeNotifier {
       return;
     }
 
-    _isPomodoroActive = true;
+    _isPaused = false;
     _isBreak = false;
 
     await _channel.invokeMethod('startPomodoro', {
@@ -1482,6 +1515,7 @@ class LauncherState extends ChangeNotifier {
     String title, {
     bool isRecurring = false,
     int estimatedPomodoros = 1,
+    int pomodoroDurationMinutes = 25,
   }) async {
     if (_plannerService == null) return;
     final task = TimeBlockTask(
@@ -1489,6 +1523,7 @@ class LauncherState extends ChangeNotifier {
       title: title,
       startTime: DateTime.now(),
       estimatedPomodoros: estimatedPomodoros,
+      pomodoroDurationMinutes: pomodoroDurationMinutes,
       isRecurring: isRecurring,
       recurringDays: isRecurring ? [1, 2, 3, 4, 5, 6, 7] : [],
     );

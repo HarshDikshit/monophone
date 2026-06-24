@@ -69,9 +69,11 @@ class UnifiedTaskService extends ChangeNotifier {
           merged['startTime'] = pt.startTime.toIso8601String();
           merged['tag'] = pt.tag.name;
           merged['estimatedPomodoros'] = pt.estimatedPomodoros;
+          merged['pomodoroDurationMinutes'] = pt.pomodoroDurationMinutes;
         } else {
           merged['durationMinutes'] = lt['durationMinutes'] ?? 60;
           merged['estimatedPomodoros'] = lt['estimatedPomodoros'] ?? 1;
+          merged['pomodoroDurationMinutes'] = lt['pomodoroDurationMinutes'] ?? 25;
         }
         bridgeMap[id] = merged;
       }
@@ -129,6 +131,7 @@ class UnifiedTaskService extends ChangeNotifier {
     bool isRecurring = false,
     int estimatedPomodoros = 1,
     int durationMinutes = 60,
+    int pomodoroDurationMinutes = 25,
     DateTime? startTime,
   }) async {
     final id = DateTime.now().millisecondsSinceEpoch.toString();
@@ -140,6 +143,7 @@ class UnifiedTaskService extends ChangeNotifier {
       title,
       isRecurring: isRecurring,
       estimatedPomodoros: estimatedPomodoros,
+      pomodoroDurationMinutes: pomodoroDurationMinutes,
     );
 
     // Add to TaskPlannerService (planner side)
@@ -150,6 +154,7 @@ class UnifiedTaskService extends ChangeNotifier {
       startTime: st,
       durationMinutes: durationMinutes,
       estimatedPomodoros: estimatedPomodoros,
+      pomodoroDurationMinutes: pomodoroDurationMinutes,
       isRecurring: isRecurring,
     );
     await _plannerService?.addTask(plannerTask);

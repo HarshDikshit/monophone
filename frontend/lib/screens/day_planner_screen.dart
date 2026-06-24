@@ -487,7 +487,7 @@ class _DayPlannerScreenState extends State<DayPlannerScreen>
                                   task.endTime.isAfter(now);
                               final totalMinutes =
                                   task.estimatedPomodoros *
-                                  _planner.pomodoroDuration;
+                                  task.pomodoroDurationMinutes;
   
                               return Positioned(
                                 top: top,
@@ -498,7 +498,7 @@ class _DayPlannerScreenState extends State<DayPlannerScreen>
                                   task: task,
                                   isActive: isActive,
                                   totalMinutes: totalMinutes,
-                                  pomoDuration: _planner.pomodoroDuration,
+                                  pomoDuration: task.pomodoroDurationMinutes,
                                   onTap: () => _showTaskSheet(context, existing: task),
                                 ),
                               );
@@ -565,7 +565,7 @@ class _DayPlannerScreenState extends State<DayPlannerScreen>
         existing: existing,
         initialDate: initialTime ?? _selectedDate,
         planner: _planner,
-        pomoDurationMins: _planner.pomodoroDuration,
+        pomoDurationMins: existing?.pomodoroDurationMinutes ?? _planner.pomodoroDuration,
       ),
     );
   }
@@ -875,6 +875,10 @@ class _TaskBlockState extends State<_TaskBlock> {
                 builder: (context, state, _) {
                   final isThisTaskActive = state.activeTaskId == widget.task.id;
                   final isRunning = state.isPomodoroActive && isThisTaskActive;
+                  // Re-fetch live task data from planner to get updated completedPomodoros
+                  final liveTask = state.planner?.getTaskById(widget.task.id);
+                  final completedPomodoros = liveTask?.completedPomodoros ?? widget.task.completedPomodoros;
+                  final estimatedPomodoros = liveTask?.estimatedPomodoros ?? widget.task.estimatedPomodoros;
 
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -950,7 +954,7 @@ class _TaskBlockState extends State<_TaskBlock> {
                                 widget.task.id,
                                 taskName: widget.task.title,
                               );
-                              state.setCustomDuration(widget.pomoDuration * 60);
+                              state.setCustomDuration(widget.task.pomodoroDurationMinutes * 60);
                               if (!state.isPomodoroActive) {
                                 state.startPomodoro();
                               }
@@ -1033,7 +1037,7 @@ class _TaskBlockState extends State<_TaskBlock> {
                           ),
                           const SizedBox(width: 4),
                           Text(
-                            '🍅${widget.task.completedPomodoros}/${widget.task.estimatedPomodoros}',
+                            '🍅$completedPomodoros/$estimatedPomodoros',
                             style: const TextStyle(
                               color: Colors.white30,
                               fontSize: 7,

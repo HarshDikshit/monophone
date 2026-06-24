@@ -225,53 +225,10 @@ class PomodoroOverlayService : Service() {
         playAlertSound()
         vibrate()
         
-        if (!isBreak) {
-            // Focus ended -> Start break ONLY if auto-start break is enabled
-            if (autoStartBreak) {
-                isBreak = true
-                secondsRemaining = 5 * 60
-                taskName = "Break Time"
-                // Restart native timer with break
-                val intent = Intent(this, PomodoroOverlayService::class.java).apply {
-                    action = ACTION_START
-                    putExtra("taskName", taskName)
-                    putExtra("durationSeconds", secondsRemaining)
-                    putExtra("isBreak", true)
-                    putExtra("timerMode", timerMode)
-                    putExtra("autoStartBreak", autoStartBreak)
-                    putExtra("autoStartNextPomodoro", autoStartNextPomodoro)
-                    putExtra("soundEnabled", soundEnabled)
-                    putExtra("vibrationEnabled", vibrationEnabled)
-                }
-                startService(intent)
-            } else {
-                // Stop & notify user to manually start break
-                stopPomodoro()
-            }
-        } else {
-            // Break ended -> Start next focus ONLY if auto-start next is enabled
-            if (autoStartNextPomodoro) {
-                isBreak = false
-                secondsRemaining = totalDurationSeconds
-                taskName = "Focus Block"
-                // Restart native timer with focus
-                val intent = Intent(this, PomodoroOverlayService::class.java).apply {
-                    action = ACTION_START
-                    putExtra("taskName", taskName)
-                    putExtra("durationSeconds", secondsRemaining)
-                    putExtra("isBreak", false)
-                    putExtra("timerMode", timerMode)
-                    putExtra("autoStartBreak", autoStartBreak)
-                    putExtra("autoStartNextPomodoro", autoStartNextPomodoro)
-                    putExtra("soundEnabled", soundEnabled)
-                    putExtra("vibrationEnabled", vibrationEnabled)
-                }
-                startService(intent)
-            } else {
-                // Stop & notify user to manually start next pomodoro
-                stopPomodoro()
-            }
-        }
+        // Always stop on completion — let Flutter side handle auto-start/break logic.
+        // This prevents double-trigger races with the Dart auto-start handlers
+        // and ensures the correct task name & duration are used.
+        stopPomodoro()
     }
 
     private fun stopPomodoro() {

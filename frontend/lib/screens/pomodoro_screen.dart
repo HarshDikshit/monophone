@@ -57,7 +57,7 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
     Map<String, dynamic> taskMap,
   ) {
     if (state.planner == null) return;
-    
+
     // Find the actual TimeBlockTask from the planner
     final taskId = taskMap['id'] as String;
     final task = state.planner!.tasks.firstWhere((t) => t.id == taskId);
@@ -70,7 +70,7 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
         existing: task,
         initialDate: DateTime.now(),
         planner: state.planner!,
-        pomoDurationMins: state.customDurationSeconds ~/ 60,
+        pomoDurationMins: task.pomodoroDurationMinutes,
       ),
     );
   }
@@ -913,6 +913,19 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
                                       modalState.switchActiveTask(
                                         isActive ? null : task['id'] as String,
                                       );
+                                      if (!isActive) {
+                                        // Set the custom duration from the task's pomodoro duration
+                                        final taskId = task['id'] as String;
+                                        final timeBlockTask = modalState.planner
+                                            ?.getTaskById(taskId);
+                                        if (timeBlockTask != null) {
+                                          modalState.setCustomDuration(
+                                            timeBlockTask
+                                                    .pomodoroDurationMinutes *
+                                                60,
+                                          );
+                                        }
+                                      }
                                     },
                                     child: Container(
                                       padding: const EdgeInsets.symmetric(

@@ -472,6 +472,7 @@ class _TaskEditSheetState extends State<TaskEditSheet> {
                 startTime: selectedTime,
                 durationMinutes: totalDurationMins,
                 estimatedPomodoros: estPomodoros,
+                pomodoroDurationMinutes: pomoDurationMins,
                 isRecurring: isRecurring,
                 recurringDays: isRecurring ? recurringDays : [],
                 focusSeconds: widget.existing?.focusSeconds ?? 0,

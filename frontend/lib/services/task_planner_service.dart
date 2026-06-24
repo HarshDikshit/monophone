@@ -56,6 +56,7 @@ class TimeBlockTask {
   DateTime startTime;
   int durationMinutes;
   int estimatedPomodoros;
+  int pomodoroDurationMinutes;
   bool isRecurring;
   List<int> recurringDays; // days of week (1=Mon..7=Sun)
   bool isCompleted;
@@ -77,6 +78,7 @@ class TimeBlockTask {
     required this.startTime,
     this.durationMinutes = 60,
     this.estimatedPomodoros = 2,
+    this.pomodoroDurationMinutes = 25,
     this.isRecurring = false,
     this.recurringDays = const [],
     this.isCompleted = false,
@@ -94,6 +96,7 @@ class TimeBlockTask {
     'startTime': startTime.toIso8601String(),
     'durationMinutes': durationMinutes,
     'estimatedPomodoros': estimatedPomodoros,
+    'pomodoroDurationMinutes': pomodoroDurationMinutes,
     'isRecurring': isRecurring,
     'recurringDays': recurringDays,
     'isCompleted': isCompleted,
@@ -114,6 +117,7 @@ class TimeBlockTask {
     startTime: DateTime.parse(json['startTime'] as String),
     durationMinutes: json['durationMinutes'] as int? ?? 60,
     estimatedPomodoros: json['estimatedPomodoros'] as int? ?? 2,
+    pomodoroDurationMinutes: json['pomodoroDurationMinutes'] as int? ?? 25,
     isRecurring: json['isRecurring'] as bool? ?? false,
     recurringDays: List<int>.from(json['recurringDays'] as List? ?? []),
     isCompleted: json['isCompleted'] as bool? ?? false,
@@ -133,6 +137,7 @@ class TimeBlockTask {
     DateTime? startTime,
     int? durationMinutes,
     int? estimatedPomodoros,
+    int? pomodoroDurationMinutes,
     bool? isRecurring,
     List<int>? recurringDays,
     bool? isCompleted,
@@ -147,6 +152,7 @@ class TimeBlockTask {
     startTime: startTime ?? this.startTime,
     durationMinutes: durationMinutes ?? this.durationMinutes,
     estimatedPomodoros: estimatedPomodoros ?? this.estimatedPomodoros,
+    pomodoroDurationMinutes: pomodoroDurationMinutes ?? this.pomodoroDurationMinutes,
     isRecurring: isRecurring ?? this.isRecurring,
     recurringDays: recurringDays ?? this.recurringDays,
     isCompleted: isCompleted ?? this.isCompleted,
