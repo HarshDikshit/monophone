@@ -20,8 +20,8 @@ class _LegoUncleState extends State<LegoUncle> {
   bool _showDialogue = false;
   Timer? _dialogueTimer;
   
-  // To track completed pomodoros and detect new ones
-  int _lastCompletedPomodoros = 0;
+  // To track completed focus sessions and detect new ones
+  int _lastCompletedFocusSessions = 0;
   
   @override
   void initState() {
@@ -75,7 +75,7 @@ class _LegoUncleState extends State<LegoUncle> {
         // Lego Uncle Figure
         LegoUncleBody(
           mood: _currentMood,
-          scale: 0.6, // Scale down for dashboard placement
+          scale: 0.5, // Reduced from 0.6 to prevent overflow on dashboard
         ),
       ],
     );
@@ -112,20 +112,19 @@ class _LegoUncleState extends State<LegoUncle> {
 
     // B. Interactive Triggers
     
-    // Trigger 1: Pomodoro Complete
-    // We check if studySeconds increased significantly or if a session was added
-    // But LauncherState has a more direct way: we can check pomSessions
+    // Trigger 1: Focus Session Complete
+    // We check if any task's focus duration reached a milestone.
     final currentPomoCount = state.studySeconds; // Simple proxy for now if direct count isn't available
     // Actually, let's use a better way if possible.
     // In launcher_state.dart: _incrementActiveTaskPomodoro() is called.
     // We can check if any task's completedPomodoros increased.
     int totalCompletedPomos = 0;
     for (final task in planner.tasks) {
-      totalCompletedPomos += task.completedPomodoros;
+      totalCompletedPomos += (task.completedPomodoros as num).toInt();
     }
 
-    if (totalCompletedPomos > _lastCompletedPomodoros) {
-      _lastCompletedPomodoros = totalCompletedPomos;
+    if (totalCompletedPomos > _lastCompletedFocusSessions) {
+      _lastCompletedFocusSessions = totalCompletedPomos;
       _currentMood = 'appreciation';
       _showDialogueTimed(_getRandomAppreciation());
     }

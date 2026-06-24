@@ -130,20 +130,16 @@ class MainActivity : FlutterActivity() {
                     stopDistractionTimer()
                     result.success(true)
                 }
-                "startPomodoro" -> {
+                "startFocusTimer" -> {
                     val taskName = call.argument<String>("taskName") ?: "Focus Block"
-                    val durationSeconds = call.argument<Int>("durationSeconds") ?: (25 * 60)
-                    val isBreak = call.argument<Boolean>("isBreak") ?: false
-                    val timerMode = call.argument<String>("timerMode") ?: "countdown"
-                    val autoStartBreak = call.argument<Boolean>("autoStartBreak") ?: true
-                    val autoStartNextPomodoro = call.argument<Boolean>("autoStartNextPomodoro") ?: true
+                    val taskId = call.argument<String>("taskId") ?: ""
                     val soundEnabled = call.argument<Boolean>("soundEnabled") ?: true
                     val vibrationEnabled = call.argument<Boolean>("vibrationEnabled") ?: true
-                    startPomodoro(taskName, durationSeconds, isBreak, timerMode, autoStartBreak, autoStartNextPomodoro, soundEnabled, vibrationEnabled)
+                    startFocusTimer(taskName, taskId, soundEnabled, vibrationEnabled)
                     result.success(true)
                 }
-                "stopPomodoro" -> {
-                    stopPomodoro()
+                "stopFocusTimer" -> {
+                    stopFocusTimer()
                     result.success(true)
                 }
                 "updateTaskName" -> {
@@ -168,8 +164,8 @@ class MainActivity : FlutterActivity() {
                     openAppSettings(packageName)
                     result.success(true)
                 }
-                "getPomodoroState" -> {
-                    result.success(getPomodoroState())
+                "getFocusState" -> {
+                    result.success(getFocusState())
                 }
 
                 // ════════════════════════════════════════════════════════════
@@ -515,24 +511,16 @@ class MainActivity : FlutterActivity() {
         stopService(intent)
     }
 
-    private fun startPomodoro(
+    private fun startFocusTimer(
         taskName: String,
-        durationSeconds: Int,
-        isBreak: Boolean,
-        timerMode: String = "countdown",
-        autoStartBreak: Boolean = true,
-        autoStartNextPomodoro: Boolean = true,
+        taskId: String,
         soundEnabled: Boolean = true,
         vibrationEnabled: Boolean = true,
     ) {
         val intent = Intent(this, PomodoroOverlayService::class.java).apply {
             action = PomodoroOverlayService.ACTION_START
             putExtra("taskName", taskName)
-            putExtra("durationSeconds", durationSeconds)
-            putExtra("isBreak", isBreak)
-            putExtra("timerMode", timerMode)
-            putExtra("autoStartBreak", autoStartBreak)
-            putExtra("autoStartNextPomodoro", autoStartNextPomodoro)
+            putExtra("taskId", taskId)
             putExtra("soundEnabled", soundEnabled)
             putExtra("vibrationEnabled", vibrationEnabled)
         }
@@ -543,7 +531,7 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun stopPomodoro() {
+    private fun stopFocusTimer() {
         val intent = Intent(this, PomodoroOverlayService::class.java).apply {
             action = PomodoroOverlayService.ACTION_STOP
         }
@@ -558,15 +546,13 @@ class MainActivity : FlutterActivity() {
         startActivity(intent)
     }
 
-    private fun getPomodoroState(): Map<String, Any>? {
+    private fun getFocusState(): Map<String, Any>? {
         val service = PomodoroOverlayService.instance
         if (service != null && service.isRunning) {
-            return mapOf(
-                "secondsRemaining" to service.secondsRemaining,
-                "isBreak" to service.isBreak,
-                "isPaused" to service.isPaused,
-                "taskName" to service.taskName,
-                "timerMode" to service.timerMode
+            return mapOf<String, Any>(
+                "elapsedSeconds" to service.elapsedSeconds,
+                "taskName" to (service.taskName ?: "Focus Block"),
+                "taskId" to (service.taskId ?: "")
             )
         }
         return null

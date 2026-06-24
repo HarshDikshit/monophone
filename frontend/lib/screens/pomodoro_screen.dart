@@ -12,16 +12,9 @@ class PomodoroScreen extends StatefulWidget {
 }
 
 class _PomodoroScreenState extends State<PomodoroScreen> {
-  // Time picker wheel state (mm:ss)
-  late int _pickerMinutes;
-  late int _pickerSeconds;
-
   @override
   void initState() {
     super.initState();
-    final state = context.read<LauncherState>();
-    _pickerMinutes = state.customDurationSeconds ~/ 60;
-    _pickerSeconds = state.customDurationSeconds % 60;
   }
 
   @override
@@ -31,8 +24,12 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
 
   String _formatTime(int totalSeconds) {
     if (totalSeconds < 0) totalSeconds = 0;
-    final m = totalSeconds ~/ 60;
+    final h = totalSeconds ~/ 3600;
+    final m = (totalSeconds % 3600) ~/ 60;
     final s = totalSeconds % 60;
+    if (h > 0) {
+      return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+    }
     return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
   }
 
@@ -45,259 +42,16 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
     return rem == 0 ? '${h}h' : '${h}h ${rem}m';
   }
 
-  void _applyPickerToState(LauncherState state) {
-    final totalSeconds = _pickerMinutes * 60 + _pickerSeconds;
-    state.setCustomDuration(totalSeconds);
-  }
 
-  // ── Task edit / details bottom sheet ──────────────────────────────────────
-  void _showTaskEditSheet(
-    BuildContext context,
-    LauncherState state,
-    Map<String, dynamic> taskMap,
-  ) {
-    if (state.planner == null) return;
-
-    // Find the actual TimeBlockTask from the planner
-    final taskId = taskMap['id'] as String;
-    final task = state.planner!.tasks.firstWhere((t) => t.id == taskId);
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => TaskEditSheet(
-        existing: task,
-        initialDate: DateTime.now(),
-        planner: state.planner!,
-        pomoDurationMins: task.pomodoroDurationMinutes,
-      ),
-    );
-  }
-
-  // ── Swipeable mm:ss picker ──────────────────────────────────────────────
-  Widget _buildTimePicker(LauncherState state) {
-    // When timer is active, don't show the picker, show the running time
-    if (state.isPomodoroActive) {
-      return Column(
-        children: [
-          Text(
-            _formatTime(state.pomodoroSecondsRemaining),
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 72.0,
-              fontWeight: FontWeight.w100,
-              letterSpacing: 4.0,
-              fontFamily: 'monospace',
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            state.isBreak
-                ? 'COFFEE / CHILL TIME'
-                : (state.timerMode == 'countup' ? 'COUNTING UP' : 'FOCUS TIME'),
-            style: TextStyle(
-              color: state.isPomodoroActive ? Colors.white38 : Colors.grey[850],
-              fontSize: 10,
-              letterSpacing: 3.0,
-              fontWeight: FontWeight.bold,
-              fontFamily: 'monospace',
-            ),
-          ),
-        ],
-      );
-    }
-
-    // Show the swipeable time picker when NOT running
-    return Column(
-      children: [
-        SizedBox(
-          height: 120,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              // Minutes wheel
-              SizedBox(
-                width: 70,
-                child: ListWheelScrollView.useDelegate(
-                  itemExtent: 45,
-                  perspective: 0.005,
-                  diameterRatio: 1.5,
-                  physics: const FixedExtentScrollPhysics(),
-                  onSelectedItemChanged: (index) {
-                    setState(() {
-                      _pickerMinutes = index;
-                    });
-                    _applyPickerToState(state);
-                  },
-                  childDelegate: ListWheelChildBuilderDelegate(
-                    childCount: 100,
-                    builder: (context, index) {
-                      final isSelected = index == _pickerMinutes;
-                      return Center(
-                        child: Text(
-                          index.toString().padLeft(2, '0'),
-                          style: TextStyle(
-                            color: isSelected ? Colors.white : Colors.white24,
-                            fontSize: isSelected ? 42 : 24,
-                            fontWeight: isSelected
-                                ? FontWeight.w200
-                                : FontWeight.w300,
-                            fontFamily: 'monospace',
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                child: Text(
-                  ':',
-                  style: TextStyle(
-                    color: Colors.white38,
-                    fontSize: 42,
-                    fontFamily: 'monospace',
-                  ),
-                ),
-              ),
-              // Seconds wheel
-              SizedBox(
-                width: 70,
-                child: ListWheelScrollView.useDelegate(
-                  itemExtent: 45,
-                  perspective: 0.005,
-                  diameterRatio: 1.5,
-                  physics: const FixedExtentScrollPhysics(),
-                  onSelectedItemChanged: (index) {
-                    setState(() {
-                      _pickerSeconds = index;
-                    });
-                    _applyPickerToState(state);
-                  },
-                  childDelegate: ListWheelChildBuilderDelegate(
-                    childCount: 60,
-                    builder: (context, index) {
-                      final isSelected = index == _pickerSeconds;
-                      return Center(
-                        child: Text(
-                          index.toString().padLeft(2, '0'),
-                          style: TextStyle(
-                            color: isSelected ? Colors.white : Colors.white24,
-                            fontSize: isSelected ? 42 : 24,
-                            fontWeight: isSelected
-                                ? FontWeight.w200
-                                : FontWeight.w300,
-                            fontFamily: 'monospace',
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          'SWIPE TO SET TIME',
-          style: TextStyle(
-            color: Colors.grey[850],
-            fontSize: 9,
-            letterSpacing: 3,
-            fontFamily: 'monospace',
-          ),
-        ),
-      ],
-    );
-  }
-
-  // ── Timer Mode Toggle ───────────────────────────────────────────────────
-  Widget _buildTimerModeToggle(LauncherState state) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.03),
-        borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: Colors.white10),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          // Countdown mode
-          GestureDetector(
-            onTap: () {
-              state.setTimerMode('countdown');
-            },
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-              decoration: BoxDecoration(
-                color: state.timerMode == 'countdown'
-                    ? Colors.white.withOpacity(0.15)
-                    : Colors.transparent,
-                borderRadius: BorderRadius.circular(2),
-              ),
-              child: Text(
-                'COUNTDOWN',
-                style: TextStyle(
-                  color: state.timerMode == 'countdown'
-                      ? Colors.white
-                      : Colors.white38,
-                  fontSize: 10,
-                  letterSpacing: 1.5,
-                  fontFamily: 'monospace',
-                  fontWeight: state.timerMode == 'countdown'
-                      ? FontWeight.bold
-                      : FontWeight.normal,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          // Countup mode
-          GestureDetector(
-            onTap: () {
-              state.setTimerMode('countup');
-            },
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-              decoration: BoxDecoration(
-                color: state.timerMode == 'countup'
-                    ? Colors.white.withOpacity(0.15)
-                    : Colors.transparent,
-                borderRadius: BorderRadius.circular(2),
-              ),
-              child: Text(
-                '∞ COUNT UP',
-                style: TextStyle(
-                  color: state.timerMode == 'countup'
-                      ? Colors.white
-                      : Colors.white38,
-                  fontSize: 10,
-                  letterSpacing: 1.5,
-                  fontFamily: 'monospace',
-                  fontWeight: state.timerMode == 'countup'
-                      ? FontWeight.bold
-                      : FontWeight.normal,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 
   // ── Build ──────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     final state = Provider.of<LauncherState>(context);
-    final isFullScreen = state.isFullScreen && state.isPomodoroActive;
+    final isFullScreen = state.isFullScreen && state.isFocusActive;
 
     // Auto fullscreen: when timer is active, if user remains here, go fullscreen
-    if (state.isPomodoroActive && !state.isFullScreen && mounted) {
+    if (state.isFocusActive && !state.isFullScreen && mounted) {
       // We'll let the user manually toggle via the button below
     }
 
@@ -313,7 +67,7 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
                 onPressed: () => Navigator.pop(context),
               ),
               title: const Text(
-                'FOCUS ENGINE',
+                'STOPWATCH',
                 style: TextStyle(
                   color: Colors.white,
                   fontFamily: 'monospace',
@@ -356,7 +110,7 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
               if (!isFullScreen) ...[
                 // ── Status label ──
                 Text(
-                  state.isBreak ? 'BREAK TIME' : 'DEEP FOCUS',
+                  'DEEP FOCUS',
                   style: TextStyle(
                     color: Colors.grey[600],
                     letterSpacing: 4.0,
@@ -367,9 +121,7 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  state.isBreak
-                      ? 'Relax. Let your brain recharge.'
-                      : 'Distraction lock active. Stay on target.',
+                  'Distraction lock active. Stay on target.',
                   style: TextStyle(
                     color: Colors.grey[800],
                     fontSize: 12,
@@ -433,7 +185,7 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       // ── Active task name (always shown when pomodoro is running) ──
-                      if (state.isPomodoroActive && !state.isBreak) ...[
+                      if (state.isFocusActive) ...[
                         Text(
                           state.activeTaskId != null
                               ? (state.activeTask?['title'] as String? ??
@@ -453,76 +205,49 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
                         const SizedBox(height: 8),
                       ],
                       // ── Timer display ──
-                      if (!state.isPomodoroActive)
-                        _buildTimePicker(state)
-                      else
-                        Column(
-                          children: [
-                            Text(
-                              _formatTime(state.pomodoroSecondsRemaining),
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: isFullScreen ? 96.0 : 72.0,
-                                fontWeight: FontWeight.w100,
-                                letterSpacing: 4.0,
-                                fontFamily: 'monospace',
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              state.isBreak
-                                  ? 'COFFEE / CHILL TIME'
-                                  : (state.timerMode == 'countup'
-                                        ? 'COUNTING UP'
-                                        : 'FOCUS TIME'),
-                              style: TextStyle(
-                                color: state.isPomodoroActive
-                                    ? Colors.white38
-                                    : Colors.grey[850],
-                                fontSize: isFullScreen ? 12 : 10,
-                                letterSpacing: 3.0,
-                                fontWeight: FontWeight.bold,
-                                fontFamily: 'monospace',
-                              ),
-                            ),
-                          ],
-                        ),
-
-                      if (state.isPomodoroActive) ...[
-                        const SizedBox(height: 12),
-                        // ── When count-up, show "stopped" hint ──
-                        if (state.timerMode == 'countup')
+                      Column(
+                        children: [
                           Text(
-                            'Counting up — stop when you\'re done',
+                            _formatTime(state.focusElapsedSeconds),
                             style: TextStyle(
-                              color: Colors.grey[700],
-                              fontSize: 10,
+                              color: Colors.white,
+                              fontSize: isFullScreen ? 96.0 : 72.0,
+                              fontWeight: FontWeight.w100,
+                              letterSpacing: 4.0,
                               fontFamily: 'monospace',
-                              letterSpacing: 1,
                             ),
                           ),
-                      ],
+                          const SizedBox(height: 6),
+                          Text(
+                            'FOCUSING',
+                            style: TextStyle(
+                              color: state.isFocusActive
+                                  ? Colors.white38
+                                  : Colors.grey[850],
+                              fontSize: isFullScreen ? 12 : 10,
+                              letterSpacing: 3.0,
+                              fontWeight: FontWeight.bold,
+                              fontFamily: 'monospace',
+                            ),
+                          ),
+                        ],
+                      ),
 
-                      if (!state.isPomodoroActive) ...[
-                        const SizedBox(height: 16),
-                        // ── Timer Mode Toggle ──
-                        _buildTimerModeToggle(state),
+                      if (state.isFocusActive) ...[
                         const SizedBox(height: 12),
-                        // Timer mode description
                         Text(
-                          state.timerMode == 'countdown'
-                              ? 'Timer runs from set time → 0'
-                              : 'Timer counts up from 0 until stopped',
+                          'Stop when you\'re done',
                           style: TextStyle(
                             color: Colors.grey[700],
                             fontSize: 10,
                             fontFamily: 'monospace',
+                            letterSpacing: 1,
                           ),
                         ),
                       ],
 
                       // ── Fullscreen toggle (always visible) ──
-                      if (state.isPomodoroActive) ...[
+                      if (state.isFocusActive) ...[
                         const SizedBox(height: 24),
                         GestureDetector(
                           onTap: () => state.toggleFullScreen(),
@@ -608,31 +333,31 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
 
               if (!isFullScreen) const SizedBox(height: 12),
 
-              // ── Start / Stop / Break button ──
+              // ── Start / Stop button ──
               GestureDetector(
                 onTap: () {
-                  if (state.isPomodoroActive) {
-                    state.stopPomodoro(manual: true);
+                  if (state.isFocusActive) {
+                    state.stopFocusTimer(manual: true);
                   } else {
-                    state.startPomodoro();
+                    state.startFocusTimer();
                   }
                 },
                 child: Container(
                   height: isFullScreen ? 56 : 52,
                   decoration: BoxDecoration(
                     border: Border.all(
-                      color: state.isPomodoroActive
+                      color: state.isFocusActive
                           ? Colors.red.withOpacity(0.6)
                           : Colors.white,
                     ),
                   ),
                   child: Center(
                     child: Text(
-                      state.isPomodoroActive
+                      state.isFocusActive
                           ? 'ABANDON SESSION'
                           : 'INITIATE FOCUS',
                       style: TextStyle(
-                        color: state.isPomodoroActive
+                        color: state.isFocusActive
                             ? Colors.red
                             : Colors.white,
                         letterSpacing: 3,
@@ -644,38 +369,6 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
                   ),
                 ),
               ),
-
-              // ── Skip break button ──
-              if (state.isPomodoroActive && state.isBreak) ...[
-                const SizedBox(height: 12),
-                GestureDetector(
-                  onTap: () {
-                    // Stop break, start new pomodoro
-                    state.stopPomodoro(manual: true);
-                    // Briefly delay then start a new pomodoro
-                    Future.delayed(const Duration(milliseconds: 300), () {
-                      state.startPomodoro();
-                    });
-                  },
-                  child: Container(
-                    height: 44,
-                    decoration: BoxDecoration(
-                      border: Border.all(color: Colors.white24),
-                    ),
-                    child: const Center(
-                      child: Text(
-                        'STOP BREAK & START NEW',
-                        style: TextStyle(
-                          color: Colors.white54,
-                          letterSpacing: 2,
-                          fontFamily: 'monospace',
-                          fontSize: 10,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
 
               if (isFullScreen) ...[
                 const SizedBox(height: 16),
@@ -738,7 +431,7 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
                       ),
                       const SizedBox(height: 16),
                       const Text(
-                        'POMODORO SETTINGS',
+                        'FOCUS SETTINGS',
                         style: TextStyle(
                           color: Colors.white,
                           fontFamily: 'monospace',
@@ -748,26 +441,6 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
                         ),
                       ),
                       const SizedBox(height: 24),
-                      _settingToggle(
-                        'Auto-start next pomodoro',
-                        'Automatically start next focus session after break ends',
-                        state.autoStartNextPomodoro,
-                        (val) {
-                          state.setAutoStartNextPomodoro(val);
-                          setSheet(() {});
-                        },
-                      ),
-                      const SizedBox(height: 16),
-                      _settingToggle(
-                        'Auto-start break',
-                        'Automatically start break when pomodoro completes',
-                        state.autoStartBreak,
-                        (val) {
-                          state.setAutoStartBreak(val);
-                          setSheet(() {});
-                        },
-                      ),
-                      const SizedBox(height: 16),
                       _settingToggle(
                         'Vibration',
                         'Vibrate when pomodoro/break starts',
@@ -917,19 +590,6 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
                                       modalState.switchActiveTask(
                                         isActive ? null : task['id'] as String,
                                       );
-                                      if (!isActive) {
-                                        // Set the custom duration from the task's pomodoro duration
-                                        final taskId = task['id'] as String;
-                                        final timeBlockTask = modalState.planner
-                                            ?.getTaskById(taskId);
-                                        if (timeBlockTask != null) {
-                                          modalState.setCustomDuration(
-                                            timeBlockTask
-                                                    .pomodoroDurationMinutes *
-                                                60,
-                                          );
-                                        }
-                                      }
                                     },
                                     child: Container(
                                       padding: const EdgeInsets.symmetric(
@@ -965,8 +625,7 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
                                                       )
                                                     : Colors.transparent,
                                                 border: Border.all(
-                                                  color:
-                                                      (task['isDone'] == true)
+                                                  color: (task['isDone'] == true)
                                                       ? Colors.green
                                                       : Colors.white24,
                                                   width: 1.5,
@@ -987,96 +646,25 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
                                                   CrossAxisAlignment.start,
                                               children: [
                                                 Text(
-                                                  task['title'] as String? ??
-                                                      '',
+                                                  task['title'] as String? ?? '',
                                                   style: TextStyle(
-                                                    color:
-                                                        (task['isDone'] == true)
-                                                        ? Colors.green
-                                                              .withOpacity(0.7)
-                                                        : (isActive
-                                                              ? Colors.white
-                                                              : Colors
-                                                                    .grey[400]),
+                                                    color: (task['isDone'] == true)
+                                                        ? Colors.green.withOpacity(0.7)
+                                                        : (isActive ? Colors.white : Colors.grey[400]),
                                                     fontSize: 14,
-                                                    decoration:
-                                                        (task['isDone'] == true)
-                                                        ? TextDecoration
-                                                              .lineThrough
+                                                    decoration: (task['isDone'] == true)
+                                                        ? TextDecoration.lineThrough
                                                         : null,
                                                   ),
                                                 ),
                                                 const SizedBox(height: 6),
-                                                Builder(
-                                                  builder: (context) {
-                                                    final completed =
-                                                        (task['completedPomodoroCount'] ??
-                                                                task['pomodoroCount'] ??
-                                                                0)
-                                                            as int;
-                                                    final estimated =
-                                                        (task['estimatedPomodoros'] ??
-                                                                1)
-                                                            as int;
-                                                    return Row(
-                                                      children: [
-                                                        ...List.generate(
-                                                          completed.clamp(
-                                                            0,
-                                                            estimated,
-                                                          ),
-                                                          (_) => const Padding(
-                                                            padding:
-                                                                EdgeInsets.only(
-                                                                  right: 3,
-                                                                ),
-                                                            child: Text(
-                                                              '🍅',
-                                                              style: TextStyle(
-                                                                fontSize: 10,
-                                                              ),
-                                                            ),
-                                                          ),
-                                                        ),
-                                                        ...List.generate(
-                                                          (estimated -
-                                                                  completed)
-                                                              .clamp(
-                                                                0,
-                                                                estimated,
-                                                              ),
-                                                          (_) => Padding(
-                                                            padding:
-                                                                const EdgeInsets.only(
-                                                                  right: 3,
-                                                                ),
-                                                            child: Icon(
-                                                              Icons
-                                                                  .circle_outlined,
-                                                              size: 10,
-                                                              color: isActive
-                                                                  ? Colors
-                                                                        .white24
-                                                                  : Colors
-                                                                        .white12,
-                                                            ),
-                                                          ),
-                                                        ),
-                                                        if (completed >
-                                                            estimated)
-                                                          Text(
-                                                            '+${completed - estimated}',
-                                                            style: const TextStyle(
-                                                              color: Colors
-                                                                  .redAccent,
-                                                              fontSize: 9,
-                                                              fontFamily:
-                                                                  'monospace',
-                                                            ),
-                                                          ),
-                                                      ],
-                                                    );
-                                                  },
+                                                Text(
+                                                  'Goal: ${task['durationMinutes'] ?? 25}m',
+                                                  style: TextStyle(
+                                                    color: isActive ? Colors.white38 : Colors.grey[700],
+                                                    fontSize: 10,
+                                                    fontFamily: 'monospace',
+                                                  ),
                                                 ),
                                               ],
                                             ),

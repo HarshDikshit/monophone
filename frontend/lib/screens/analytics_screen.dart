@@ -218,11 +218,26 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       );
 
       int studySec = _calcStudyFromDay(match.cast<String, dynamic>(), state);
+      final todayKey =
+          '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+
       List sessions = List.from(match['sessions'] as List? ?? []);
       List taskAnalytics = List.from(match['taskAnalytics'] as List? ?? []);
 
-      final todayKey =
-          '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+      if (key == todayKey) {
+        // Overlay local planner data onto backend data for realtime accuracy
+        final localTasks = state.planner?.tasks ?? [];
+        taskAnalytics = localTasks
+            .where((t) => t.focusSeconds > 0)
+            .map((t) => {
+                  'taskId': t.id,
+                  'title': t.title,
+                  'seconds': t.focusSeconds,
+                  'tag': t.tag.name.toUpperCase(),
+                })
+            .toList();
+      }
+
       return _DateWindow(
         title: key == todayKey ? 'TODAY' : key,
         totalStudySeconds: studySec,

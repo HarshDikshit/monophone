@@ -476,16 +476,15 @@ class _LauncherHomeState extends State<LauncherHome>
     final packageName = app['packageName'] ?? '';
     final appName = app['name'] ?? 'App';
 
-    // Pomodoro Hard Lock Intercept
-    if (state.isPomodoroActive &&
-        !state.isBreak &&
+    // Focus Timer Hard Lock Intercept
+    if (state.isFocusActive &&
         state.distractionApps.contains(packageName)) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           backgroundColor: Colors.black,
           shape: Border.all(color: Colors.white24),
           content: const Text(
-            'LAUNCH LOCKED: POMODORO IN PROGRESS',
+            'LAUNCH LOCKED: FOCUS TIMER IN PROGRESS',
             style: TextStyle(
               color: Colors.red,
               fontFamily: 'monospace',
@@ -1801,7 +1800,7 @@ class _LauncherHomeState extends State<LauncherHome>
                       24.0,
                       16.0,
                       24.0,
-                      16.0 + bottomInset + 72.0,
+                      16.0 + bottomInset + 40.0,
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,

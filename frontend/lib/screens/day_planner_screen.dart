@@ -48,7 +48,7 @@ class _DayPlannerScreenState extends State<DayPlannerScreen>
   }
 
   void _scrollToCurrentTime() {
-    const hourHeight = 120.0;
+    const hourHeight = 300.0;
     final now = DateTime.now();
     final target =
         now.hour * hourHeight + (now.minute / 60.0) * hourHeight - 120;
@@ -69,7 +69,8 @@ class _DayPlannerScreenState extends State<DayPlannerScreen>
   void didChangeDependencies() {
     super.didChangeDependencies();
     _timeRefreshTimer?.cancel();
-    _timeRefreshTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+    // Refresh every 1 second for realtime height updates during focus
+    _timeRefreshTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() {});
     });
   }
@@ -106,7 +107,7 @@ class _DayPlannerScreenState extends State<DayPlannerScreen>
   }
 
   double _computeHourHeight(List<TimeBlockTask> tasks) {
-    if (tasks.isEmpty) return 120.0;
+    if (tasks.isEmpty) return 300.0;
     int minHour = 23;
     int maxHour = 0;
     for (final t in tasks) {
@@ -116,7 +117,7 @@ class _DayPlannerScreenState extends State<DayPlannerScreen>
       if (eh > maxHour) maxHour = eh;
     }
     final span = (maxHour - minHour).clamp(1, 18);
-    final base = (400.0 / span).clamp(60.0, 180.0);
+    final base = (900.0 / span).clamp(200.0, 400.0);
     return base;
   }
 
@@ -435,6 +436,7 @@ class _DayPlannerScreenState extends State<DayPlannerScreen>
                         height: totalHeight,
                         child: Stack(
                           children: [
+                            // Hour lines with 15-min markers
                             ...List.generate(24, (h) {
                               return Positioned(
                                 top: h * hourHeight,
@@ -442,32 +444,95 @@ class _DayPlannerScreenState extends State<DayPlannerScreen>
                                 right: 0,
                                 child: SizedBox(
                                   height: hourHeight,
-                                  child: Row(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                  child: Column(
                                     children: [
-                                      SizedBox(
-                                        width: 48,
-                                        child: Text(
-                                          '${h.toString().padLeft(2, '0')}:00',
-                                          style: TextStyle(
-                                            color: Colors.grey[800],
-                                            fontFamily: 'monospace',
-                                            fontSize: 9,
-                                          ),
-                                          textAlign: TextAlign.center,
-                                        ),
-                                      ),
+                                      // Main hour row
                                       Expanded(
-                                        child: Container(
-                                          decoration: BoxDecoration(
-                                            border: Border(
-                                              top: BorderSide(
-                                                color: Colors.white.withOpacity(
-                                                  0.06,
+                                        child: Row(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            SizedBox(
+                                              width: 56,
+                                              child: Text(
+                                                '${h.toString().padLeft(2, '0')}:00',
+                                                style: TextStyle(
+                                                  color: Colors.grey[800],
+                                                  fontFamily: 'monospace',
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                                textAlign: TextAlign.center,
+                                              ),
+                                            ),
+                                            Expanded(
+                                              child: Container(
+                                                decoration: BoxDecoration(
+                                                  border: Border(
+                                                    top: BorderSide(
+                                                      color: Colors.white.withOpacity(0.10),
+                                                    ),
+                                                  ),
                                                 ),
                                               ),
                                             ),
-                                          ),
+                                          ],
+                                        ),
+                                      ),
+                                      // :15 marker
+                                      Expanded(
+                                        child: Row(
+                                          children: [
+                                            const SizedBox(width: 56),
+                                            Expanded(
+                                              child: Container(
+                                                decoration: BoxDecoration(
+                                                  border: Border(
+                                                    top: BorderSide(
+                                                      color: Colors.white.withOpacity(0.04),
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      // :30 marker
+                                      Expanded(
+                                        child: Row(
+                                          children: [
+                                            const SizedBox(width: 56),
+                                            Expanded(
+                                              child: Container(
+                                                decoration: BoxDecoration(
+                                                  border: Border(
+                                                    top: BorderSide(
+                                                      color: Colors.white.withOpacity(0.06),
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      // :45 marker
+                                      Expanded(
+                                        child: Row(
+                                          children: [
+                                            const SizedBox(width: 56),
+                                            Expanded(
+                                              child: Container(
+                                                decoration: BoxDecoration(
+                                                  border: Border(
+                                                    top: BorderSide(
+                                                      color: Colors.white.withOpacity(0.04),
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ],
                                         ),
                                       ),
                                     ],
@@ -475,35 +540,36 @@ class _DayPlannerScreenState extends State<DayPlannerScreen>
                                 ),
                               );
                             }),
-  
+
+                            // Task blocks
                             ...tasks.map((task) {
                               final top =
                                   task.startTime.hour * hourHeight +
                                   (task.startTime.minute / 60.0) * hourHeight;
-                              final height =
-                                  (task.durationMinutes / 60.0) * hourHeight;
+                              // Height: starts at scheduled duration, grows when focus time exceeds it
+                              final scheduledHours = task.durationMinutes / 60.0;
+                              final focusHours = task.focusSeconds / 3600.0;
+                              final displayHours = focusHours > scheduledHours
+                                  ? focusHours
+                                  : scheduledHours;
+                              final height = displayHours * hourHeight;
                               final isActive =
                                   task.startTime.isBefore(now) &&
                                   task.endTime.isAfter(now);
-                              final totalMinutes =
-                                  task.estimatedPomodoros *
-                                  task.pomodoroDurationMinutes;
-  
                               return Positioned(
                                 top: top,
-                                left: 52,
+                                left: 60,
                                 right: 8,
-                                height: height.clamp(50.0, hourHeight * 5),
+                                height: height.clamp(50.0, hourHeight * 12),
                                 child: _TaskBlock(
                                   task: task,
                                   isActive: isActive,
-                                  totalMinutes: totalMinutes,
-                                  pomoDuration: task.pomodoroDurationMinutes,
                                   onTap: () => _showTaskSheet(context, existing: task),
                                 ),
                               );
                             }),
-  
+
+                            // Current time indicator
                             if (isToday)
                               Positioned(
                                 top:
@@ -514,24 +580,25 @@ class _DayPlannerScreenState extends State<DayPlannerScreen>
                                 child: Row(
                                   children: [
                                     Container(
-                                      width: 48,
+                                      width: 56,
                                       alignment: Alignment.center,
                                       child: Text(
                                         '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}',
                                         style: const TextStyle(
                                           color: Colors.redAccent,
                                           fontFamily: 'monospace',
-                                          fontSize: 9,
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.bold,
                                         ),
                                       ),
                                     ),
                                     Expanded(
                                       child: Container(
-                                        height: 1,
+                                        height: 2,
                                         color: Colors.redAccent,
                                       ),
                                     ),
-                                    ],
+                                  ],
                                 ),
                               ),
                           ],
@@ -565,7 +632,8 @@ class _DayPlannerScreenState extends State<DayPlannerScreen>
         existing: existing,
         initialDate: initialTime ?? _selectedDate,
         planner: _planner,
-        pomoDurationMins: existing?.pomodoroDurationMinutes ?? _planner.pomodoroDuration,
+        initialDurationMins:
+            existing?.durationMinutes ?? _planner.pomodoroDuration,
       ),
     );
   }
@@ -705,15 +773,11 @@ class _DayPlannerScreenState extends State<DayPlannerScreen>
 class _TaskBlock extends StatefulWidget {
   final TimeBlockTask task;
   final bool isActive;
-  final int totalMinutes;
-  final int pomoDuration;
   final VoidCallback onTap;
 
   const _TaskBlock({
     required this.task,
     required this.isActive,
-    required this.totalMinutes,
-    required this.pomoDuration,
     required this.onTap,
   });
 
@@ -740,6 +804,26 @@ class _TaskBlockState extends State<_TaskBlock> {
       _dragOffset = 0;
       _isRevealed = false;
     });
+  }
+
+  /// Compute live focus seconds: stored + live session seconds if this task is active
+  int _liveFocusSeconds(LauncherState state) {
+    // LauncherState already attributes focus seconds to the task every 1-sec tick
+    // and calls notifyListeners(). Thus, widget.task.focusSeconds IS the realtime total.
+    return widget.task.focusSeconds;
+  }
+
+  String _formatDuration(int seconds) {
+    if (seconds < 3600) {
+      final m = seconds ~/ 60;
+      final s = seconds % 60;
+      return '$m:${s.toString().padLeft(2, '0')}';
+    } else {
+      final h = seconds ~/ 3600;
+      final m = (seconds % 3600) ~/ 60;
+      final s = seconds % 60;
+      return '$h:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+    }
   }
 
   @override
@@ -854,7 +938,7 @@ class _TaskBlockState extends State<_TaskBlock> {
             AnimatedContainer(
               duration: const Duration(milliseconds: 200),
               transform: Matrix4.translationValues(_dragOffset, 0, 0),
-              padding: const EdgeInsets.all(6),
+              padding: const EdgeInsets.all(8),
               height: double.infinity,
               decoration: BoxDecoration(
                 color: widget.task.isCompleted
@@ -867,220 +951,262 @@ class _TaskBlockState extends State<_TaskBlock> {
                         : (widget.task.isCompleted
                               ? Colors.green.withOpacity(0.6)
                               : Colors.amber.withOpacity(0.6)),
-                    width: widget.isActive ? 2 : 1,
+                    width: widget.isActive ? 3 : 2,
                   ),
                 ),
               ),
               child: Consumer<LauncherState>(
                 builder: (context, state, _) {
                   final isThisTaskActive = state.activeTaskId == widget.task.id;
-                  final isRunning = state.isPomodoroActive && isThisTaskActive;
-                  // Re-fetch live task data from planner to get updated completedPomodoros
-                  final liveTask = state.planner?.getTaskById(widget.task.id);
-                  final completedPomodoros = liveTask?.completedPomodoros ?? widget.task.completedPomodoros;
-                  final estimatedPomodoros = liveTask?.estimatedPomodoros ?? widget.task.estimatedPomodoros;
+                  final isRunning = state.isFocusActive && isThisTaskActive;
+                  // Live focus seconds: stored + current session
+                  final liveFocusSeconds = _liveFocusSeconds(state);
+                  // Focus progress: ratio of live focus time vs scheduled duration
+                  final scheduledSeconds = widget.task.durationMinutes * 60;
+                  final focusRatio = scheduledSeconds > 0
+                      ? (liveFocusSeconds / scheduledSeconds).clamp(0.0, 1.0)
+                      : 0.0;
 
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.max,
+                  return Stack(
                     children: [
-                      Row(
-                        children: [
-                          // Completion indicator icon (visual only)
-                          Container(
-                            width: 12,
-                            height: 12,
-                            margin: const EdgeInsets.only(right: 4),
+                      // Focus progress fill bar
+                      Positioned.fill(
+                        child: FractionallySizedBox(
+                          alignment: Alignment.bottomCenter,
+                          heightFactor: focusRatio,
+                          child: Container(
                             decoration: BoxDecoration(
-                              shape: BoxShape.circle,
                               color: widget.task.isCompleted
-                                  ? Colors.green.withOpacity(0.2)
-                                  : Colors.transparent,
-                              border: Border.all(
-                                color: widget.task.isCompleted
-                                    ? Colors.green
-                                    : Colors.white24,
-                                width: 1.5,
-                              ),
-                            ),
-                            child: widget.task.isCompleted
-                                ? const Icon(
-                                    Icons.check,
-                                    size: 8,
-                                    color: Colors.green,
-                                  )
-                                : null,
-                          ),
-                          Icon(
-                            widget.task.tag.icon,
-                            size: 9,
-                            color: widget.task.tag.color,
-                          ),
-                          const SizedBox(width: 4),
-                          Expanded(
-                            child: SingleChildScrollView(
-                              scrollDirection: Axis.horizontal,
-                              child: Text(
-                                widget.task.title,
-                                style: TextStyle(
-                                  color: widget.task.isCompleted
-                                      ? Colors.green.withOpacity(0.7)
-                                      : Colors.white,
-                                  fontFamily: 'monospace',
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                  decoration: widget.task.isCompleted
-                                      ? TextDecoration.lineThrough
-                                      : null,
-                                ),
-                              ),
-                            ),
-                          ),
-                          // Bell icon for alarm-enabled tasks
-                          if (widget.task.isAlarmEnabled)
-                            const Padding(
-                              padding: EdgeInsets.only(right: 2),
-                              child: Icon(
-                                Icons.notifications_active,
-                                color: Colors.orangeAccent,
-                                size: 8,
-                              ),
-                            ),
-                          const SizedBox(width: 4),
-                          // Play button
-                          GestureDetector(
-                            onTap: () {
-                              state.switchActiveTask(
-                                widget.task.id,
-                                taskName: widget.task.title,
-                              );
-                              state.setCustomDuration(widget.task.pomodoroDurationMinutes * 60);
-                              if (!state.isPomodoroActive) {
-                                state.startPomodoro();
-                              }
-                            },
-                            child: Container(
-                              width: 22,
-                              height: 22,
-                              decoration: BoxDecoration(
-                                color: isRunning
-                                    ? Colors.white.withOpacity(0.1)
-                                    : Colors.transparent,
-                                border: Border.all(
-                                  color: isRunning
-                                      ? Colors.white38
-                                      : Colors.white12,
-                                ),
-                              ),
-                              child: Icon(
-                                Icons.play_arrow,
-                                color: isRunning
-                                    ? Colors.white
-                                    : Colors.greenAccent,
-                                size: 13,
-                              ),
-                            ),
-                          ),
-                          if (isRunning) ...[
-                            const SizedBox(width: 2),
-                            GestureDetector(
-                              onTap: () {
-                                state.stopPomodoro(manual: true);
-                                state.switchActiveTask(null);
-                              },
-                              child: Container(
-                                width: 22,
-                                height: 22,
-                                decoration: BoxDecoration(
-                                  color: Colors.red.withOpacity(0.1),
-                                ),
-                                child: const Icon(
-                                  Icons.stop,
-                                  color: Colors.redAccent,
-                                  size: 12,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                      const SizedBox(height: 2),
-                      Row(
-                        children: [
-                          Text(
-                            '${widget.task.startTime.hour.toString().padLeft(2, '0')}:${widget.task.startTime.minute.toString().padLeft(2, '0')}-${widget.task.endTime.hour.toString().padLeft(2, '0')}:${widget.task.endTime.minute.toString().padLeft(2, '0')}',
-                            style: const TextStyle(
-                              color: Colors.white30,
-                              fontFamily: 'monospace',
-                              fontSize: 7,
-                            ),
-                          ),
-                          const SizedBox(width: 4),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 3,
-                              vertical: 1,
-                            ),
-                            decoration: BoxDecoration(
-                              border: Border.all(
-                                color: widget.task.tag.color.withOpacity(0.4),
-                              ),
-                            ),
-                            child: Text(
-                              widget.task.tag.displayName.substring(0, 3),
-                              style: TextStyle(
-                                color: widget.task.tag.color,
-                                fontSize: 6,
-                                fontFamily: 'monospace',
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            '🍅$completedPomodoros/$estimatedPomodoros',
-                            style: const TextStyle(
-                              color: Colors.white30,
-                              fontSize: 7,
-                              fontFamily: 'monospace',
-                            ),
-                          ),
-                          const Spacer(),
-                          Text(
-                            '${widget.totalMinutes}m',
-                            style: const TextStyle(
-                              color: Colors.white24,
-                              fontSize: 7,
-                              fontFamily: 'monospace',
-                            ),
-                          ),
-                          if (isRunning) ...[
-                            const SizedBox(width: 4),
-                            Text(
-                              '${(state.pomodoroSecondsRemaining ~/ 60).toString().padLeft(2, '0')}:${(state.pomodoroSecondsRemaining % 60).toString().padLeft(2, '0')}',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 7,
-                                fontFamily: 'monospace',
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                      if (widget.task.description.isNotEmpty) ...[
-                        const SizedBox(height: 1),
-                        SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: Text(
-                            widget.task.description,
-                            style: const TextStyle(
-                              color: Colors.white12,
-                              fontSize: 6,
-                              fontFamily: 'monospace',
+                                  ? Colors.green.withOpacity(0.15)
+                                  : Colors.amber.withOpacity(0.12),
                             ),
                           ),
                         ),
-                      ],
+                      ),
+                      // Content
+                      Padding(
+                        padding: const EdgeInsets.all(8),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.max,
+                          children: [
+                            Row(
+                              children: [
+                                // Completion indicator icon
+                                Container(
+                                  width: 14,
+                                  height: 14,
+                                  margin: const EdgeInsets.only(right: 6),
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: widget.task.isCompleted
+                                        ? Colors.green.withOpacity(0.2)
+                                        : Colors.transparent,
+                                    border: Border.all(
+                                      color: widget.task.isCompleted
+                                          ? Colors.green
+                                          : Colors.white24,
+                                      width: 2,
+                                    ),
+                                  ),
+                                  child: widget.task.isCompleted
+                                      ? const Icon(
+                                          Icons.check,
+                                          size: 9,
+                                          color: Colors.green,
+                                        )
+                                      : null,
+                                ),
+                                Icon(
+                                  widget.task.tag.icon,
+                                  size: 12,
+                                  color: widget.task.tag.color,
+                                ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: SingleChildScrollView(
+                                    scrollDirection: Axis.horizontal,
+                                    child: Text(
+                                      widget.task.title,
+                                      style: TextStyle(
+                                        color: widget.task.isCompleted
+                                            ? Colors.green.withOpacity(0.7)
+                                            : Colors.white,
+                                        fontFamily: 'monospace',
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                        decoration: widget.task.isCompleted
+                                            ? TextDecoration.lineThrough
+                                            : null,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                // Bell icon for alarm-enabled tasks
+                                if (widget.task.isAlarmEnabled)
+                                  const Padding(
+                                    padding: EdgeInsets.only(right: 2),
+                                    child: Icon(
+                                      Icons.notifications_active,
+                                      color: Colors.orangeAccent,
+                                      size: 10,
+                                    ),
+                                  ),
+                                const SizedBox(width: 6),
+                                // Play button
+                                GestureDetector(
+                                  onTap: () {
+                                    state.switchActiveTask(
+                                      widget.task.id,
+                                      taskName: widget.task.title,
+                                    );
+                                    if (!state.isFocusActive) {
+                                      state.startFocusTimer();
+                                    }
+                                  },
+                                  child: Container(
+                                    width: 28,
+                                    height: 28,
+                                    decoration: BoxDecoration(
+                                      color: isRunning
+                                          ? Colors.white.withOpacity(0.1)
+                                          : Colors.transparent,
+                                      border: Border.all(
+                                        color: isRunning
+                                            ? Colors.white38
+                                            : Colors.white12,
+                                      ),
+                                    ),
+                                    child: Icon(
+                                      Icons.play_arrow,
+                                      color: isRunning
+                                          ? Colors.white
+                                          : Colors.greenAccent,
+                                      size: 16,
+                                    ),
+                                  ),
+                                ),
+                                if (isRunning) ...[
+                                  const SizedBox(width: 4),
+                                  GestureDetector(
+                                    onTap: () {
+                                      state.stopFocusTimer(manual: true);
+                                      state.switchActiveTask(null);
+                                    },
+                                    child: Container(
+                                      width: 28,
+                                      height: 28,
+                                      decoration: BoxDecoration(
+                                        color: Colors.red.withOpacity(0.1),
+                                      ),
+                                      child: const Icon(
+                                        Icons.stop,
+                                        color: Colors.redAccent,
+                                        size: 14,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                Text(
+                                  '${widget.task.startTime.hour.toString().padLeft(2, '0')}:${widget.task.startTime.minute.toString().padLeft(2, '0')}-${widget.task.endTime.hour.toString().padLeft(2, '0')}:${widget.task.endTime.minute.toString().padLeft(2, '0')}',
+                                  style: const TextStyle(
+                                    color: Colors.white30,
+                                    fontFamily: 'monospace',
+                                    fontSize: 9,
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 4,
+                                    vertical: 2,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    border: Border.all(
+                                      color: widget.task.tag.color.withOpacity(0.4),
+                                    ),
+                                  ),
+                                  child: Text(
+                                    widget.task.tag.displayName.substring(0, 3),
+                                    style: TextStyle(
+                                      color: widget.task.tag.color,
+                                      fontSize: 8,
+                                      fontFamily: 'monospace',
+                                    ),
+                                  ),
+                                ),
+                                const Spacer(),
+                                // Live focus time display with MM:SS precision
+                                Text(
+                                  _formatDuration(liveFocusSeconds),
+                                  style: TextStyle(
+                                    color: liveFocusSeconds > 0
+                                        ? Colors.greenAccent.withOpacity(0.7)
+                                        : Colors.white24,
+                                    fontSize: 9,
+                                    fontFamily: 'monospace',
+                                    fontWeight: liveFocusSeconds > 0
+                                        ? FontWeight.bold
+                                        : FontWeight.normal,
+                                  ),
+                                ),
+                                const SizedBox(width: 4),
+                                // User-defined duration in hh:mm format
+                                Text(
+                                  '/ ${(widget.task.durationMinutes ~/ 60).toString().padLeft(2, '0')}:${(widget.task.durationMinutes % 60).toString().padLeft(2, '0')}h',
+                                  style: const TextStyle(
+                                    color: Colors.white24,
+                                    fontSize: 9,
+                                    fontFamily: 'monospace',
+                                  ),
+                                ),
+                                if (isRunning) ...[
+                                  const SizedBox(width: 6),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 4,
+                                      vertical: 2,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      border: Border.all(
+                                        color: Colors.greenAccent.withOpacity(0.3),
+                                      ),
+                                    ),
+                                    child: Text(
+                                      state.focusElapsedSecondsFormatted,
+                                      style: const TextStyle(
+                                        color: Colors.greenAccent,
+                                        fontSize: 9,
+                                        fontFamily: 'monospace',
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                            if (widget.task.description.isNotEmpty) ...[
+                              const SizedBox(height: 2),
+                              SingleChildScrollView(
+                                scrollDirection: Axis.horizontal,
+                                child: Text(
+                                  widget.task.description,
+                                  style: const TextStyle(
+                                    color: Colors.white12,
+                                    fontSize: 8,
+                                    fontFamily: 'monospace',
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
                     ],
                   );
                 },
