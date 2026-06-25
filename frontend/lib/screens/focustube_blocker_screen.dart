@@ -448,7 +448,7 @@ class _FocusTubeBlockerScreenState extends State<FocusTubeBlockerScreen> {
                     ),
                   ),
                 );
-              }).toList(),
+              }),
 
             const SizedBox(height: 24),
 
@@ -632,7 +632,7 @@ class _FocusTubeBlockerScreenState extends State<FocusTubeBlockerScreen> {
                   ),
                   Switch(
                     value: _vpnContentFilter,
-                    activeColor: Colors.white,
+                    activeThumbColor: Colors.white,
                     activeTrackColor: Colors.white60,
                     inactiveThumbColor: Colors.grey[800],
                     inactiveTrackColor: Colors.white10,
@@ -690,7 +690,7 @@ class _FocusTubeBlockerScreenState extends State<FocusTubeBlockerScreen> {
                   ),
                   Switch(
                     value: _monochromeMode,
-                    activeColor: Colors.white,
+                    activeThumbColor: Colors.white,
                     activeTrackColor: Colors.white60,
                     inactiveThumbColor: Colors.grey[800],
                     inactiveTrackColor: Colors.white10,
@@ -756,7 +756,7 @@ class _FocusTubeBlockerScreenState extends State<FocusTubeBlockerScreen> {
                   ),
                   Switch(
                     value: _notificationSilence,
-                    activeColor: Colors.white,
+                    activeThumbColor: Colors.white,
                     activeTrackColor: Colors.white60,
                     inactiveThumbColor: Colors.grey[800],
                     inactiveTrackColor: Colors.white10,
@@ -862,7 +862,7 @@ class _FocusTubeBlockerScreenState extends State<FocusTubeBlockerScreen> {
                       ),
                       Switch(
                         value: _isStrictMode,
-                        activeColor: Colors.redAccent,
+                        activeThumbColor: Colors.redAccent,
                         activeTrackColor: Colors.redAccent.withOpacity(0.4),
                         inactiveThumbColor: Colors.grey[800],
                         inactiveTrackColor: Colors.white10,
@@ -968,7 +968,7 @@ class _FocusTubeBlockerScreenState extends State<FocusTubeBlockerScreen> {
           ),
           Switch(
             value: value,
-            activeColor: Colors.white,
+            activeThumbColor: Colors.white,
             activeTrackColor: Colors.white60,
             inactiveThumbColor: Colors.grey[800],
             inactiveTrackColor: Colors.white10,
@@ -1026,7 +1026,7 @@ class _FocusTubeBlockerScreenState extends State<FocusTubeBlockerScreen> {
           children: [
             Switch(
               value: isEnabled,
-              activeColor: Colors.white,
+              activeThumbColor: Colors.white,
               activeTrackColor: Colors.white60,
               inactiveThumbColor: Colors.grey[800],
               inactiveTrackColor: Colors.white10,
@@ -1229,8 +1229,9 @@ class _FocusTubeBlockerScreenState extends State<FocusTubeBlockerScreen> {
                         children: [
                           GestureDetector(
                             onTap: () {
-                              if (emergencyCount > 1)
+                              if (emergencyCount > 1) {
                                 setDialogState(() => emergencyCount--);
+                              }
                             },
                             child: Container(
                               width: 32,
@@ -1265,8 +1266,9 @@ class _FocusTubeBlockerScreenState extends State<FocusTubeBlockerScreen> {
                           ),
                           GestureDetector(
                             onTap: () {
-                              if (emergencyCount < 5)
+                              if (emergencyCount < 5) {
                                 setDialogState(() => emergencyCount++);
+                              }
                             },
                             child: Container(
                               width: 32,
@@ -1604,8 +1606,7 @@ class _FocusTubeBlockerScreenState extends State<FocusTubeBlockerScreen> {
               onPrimary: Colors.black,
               surface: Colors.black,
               onSurface: Colors.white,
-            ),
-            dialogBackgroundColor: Colors.black,
+            ), dialogTheme: DialogThemeData(backgroundColor: Colors.black),
           ),
           child: child!,
         );

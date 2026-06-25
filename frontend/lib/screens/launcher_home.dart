@@ -28,7 +28,7 @@ class _LauncherHomeState extends State<LauncherHome>
   final _goalController = TextEditingController();
   bool _isEditingGoal = false;
 
-  String _searchQuery = '';
+  final String _searchQuery = '';
 
   // Swipe Gestures & Overlays
   String _activeOverlay = 'none'; // 'none', 'app_drawer', 'thought_dump'
@@ -932,7 +932,7 @@ class _LauncherHomeState extends State<LauncherHome>
                         ),
                         Switch(
                           value: state.doubleTapLockScreen,
-                          activeColor: Colors.white,
+                          activeThumbColor: Colors.white,
                           activeTrackColor: Colors.white60,
                           inactiveThumbColor: Colors.grey[800],
                           inactiveTrackColor: Colors.white10,
@@ -968,7 +968,7 @@ class _LauncherHomeState extends State<LauncherHome>
                         ),
                         Switch(
                           value: state.doubleTapOpenDrawer,
-                          activeColor: Colors.white,
+                          activeThumbColor: Colors.white,
                           activeTrackColor: Colors.white60,
                           inactiveThumbColor: Colors.grey[800],
                           inactiveTrackColor: Colors.white10,

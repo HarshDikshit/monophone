@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/launcher_state.dart';
-import '../services/task_planner_service.dart';
-import '../services/unified_task_service.dart';
 
 /// A compact left-panel sidebar with:
 ///   - Quick Task Block Creation

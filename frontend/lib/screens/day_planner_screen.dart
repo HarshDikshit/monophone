@@ -28,9 +28,11 @@ class _DayPlannerScreenState extends State<DayPlannerScreen>
   @override
   void initState() {
     super.initState();
-    _planner = TaskPlannerService();
+    // Use the shared planner from LauncherState
+    final launcherState = context.read<LauncherState>();
+    _planner = launcherState.planner;
+
     _planner.addListener(_onPlannerChange);
-    _planner.load();
     _alarmService.addListener(_onPlannerChange);
     _alarmService.attach(_planner);
     _viewAnimCtrl = AnimationController(
@@ -42,7 +44,6 @@ class _DayPlannerScreenState extends State<DayPlannerScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final launcherState = context.read<LauncherState>();
       UnifiedTaskService.instance.attach(launcherState, _planner);
-      launcherState.attachPlanner(_planner);
       _scrollToCurrentTime();
     });
   }
@@ -78,11 +79,8 @@ class _DayPlannerScreenState extends State<DayPlannerScreen>
   @override
   void dispose() {
     _timeRefreshTimer?.cancel();
-    _alarmService.removeListener(_onPlannerChange);
-    _alarmService.detach();
     _alarmService.dispose();
     _planner.removeListener(_onPlannerChange);
-    _planner.dispose();
     _viewAnimCtrl.dispose();
     _scrollCtrl.dispose();
     super.dispose();

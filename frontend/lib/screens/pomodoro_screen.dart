@@ -510,7 +510,7 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
           Switch(
             value: value,
             onChanged: onChanged,
-            activeColor: Colors.white,
+            activeThumbColor: Colors.white,
             activeTrackColor: Colors.white38,
           ),
         ],

@@ -58,6 +58,7 @@ class LauncherState extends ChangeNotifier {
 
   Map<String, int> _weeklyStudyData = {};
   Map<String, int> get weeklyStudyData => _weeklyStudyData;
+  Map<String, int> get taskStudySeconds => _taskStudySeconds;
 
   // Focus Timer
   bool _isFocusActive = false;
@@ -140,6 +141,7 @@ class LauncherState extends ChangeNotifier {
 
   Future<void> _init() async {
     await refreshAppsList();
+    await _plannerService.load();
     await _loadLocalStats();
     _initMethodChannel();
     checkBatteryOptimizationStatus();
@@ -206,7 +208,7 @@ class LauncherState extends ChangeNotifier {
             // This ensures the day planner UI, analytics screen, and all task
             // analytics reflect the focus time in realtime (every 1 second).
             if (_activeTaskId != null) {
-              _attributeSecondsToTask(_activeTaskId, 1, persist: false);
+              _attributeSecondsToTask(_activeTaskId, 1, persistToDisk: false);
             }
 
             // Periodic commit every 60 seconds to prevent data loss
@@ -495,8 +497,10 @@ class LauncherState extends ChangeNotifier {
     _focusPendingSeconds = 0;
     _focusDirty = true;
 
+    // Seconds are already attributed to the task in real-time via onFocusTick.
+    // Just persist the planner data to disk.
     if (_activeTaskId != null && taskSeconds > 0) {
-      _attributeSecondsToTask(_activeTaskId, taskSeconds);
+      _plannerService?.persist();
     }
 
     await _saveLocalStats();
@@ -616,6 +620,7 @@ class LauncherState extends ChangeNotifier {
 
   Future<void> handleResume() async {
     final now = DateTime.now();
+    _checkMidnightReset();
 
     // Throttle native checks to at most once every 5 minutes
     // OR if permissions were previously missing (to auto-detect grant)
@@ -1272,16 +1277,17 @@ class LauncherState extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Optional reference to TaskPlannerService for syncing pomodoro counts
-  TaskPlannerService? _plannerService;
-  TaskPlannerService? get planner => _plannerService;
+  // Centrally managed TaskPlannerService
+  final TaskPlannerService _plannerService = TaskPlannerService();
+  TaskPlannerService get planner => _plannerService;
+
   void attachPlanner(TaskPlannerService planner) {
-    _plannerService = planner;
+    // Redundant as we now own the planner, but kept for compatibility
   }
 
   // ── Pomodoro Settings ──
-  bool _autoStartNextPomodoro = false;
-  bool _autoStartBreak = false;
+  final bool _autoStartNextPomodoro = false;
+  final bool _autoStartBreak = false;
   bool _vibrationEnabled = true;
   bool _soundEnabled = true;
 
@@ -1338,9 +1344,9 @@ class LauncherState extends ChangeNotifier {
     }
   }
 
-  void _attributeSecondsToTask(String? taskId, int seconds, {bool persist = true}) {
+  void _attributeSecondsToTask(String? taskId, int seconds, {bool persistToDisk = true}) {
     if (taskId == null || seconds <= 0 || _plannerService == null) return;
-    _plannerService!.addFocusSeconds(taskId, seconds, persist: persist);
+    _plannerService!.addFocusSeconds(taskId, seconds, persistToDisk: persistToDisk);
 
     // Also track for today's specific analytics record
     _taskStudySeconds[taskId] = (_taskStudySeconds[taskId] ?? 0) + seconds;

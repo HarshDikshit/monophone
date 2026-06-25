@@ -407,7 +407,7 @@ class _SelectedGroupDetailScreenState extends State<_SelectedGroupDetailScreen> 
     return ListView.separated(
       padding: const EdgeInsets.all(24),
       itemCount: _members.length,
-      separatorBuilder: (_, __) => const Divider(color: Colors.white10),
+      separatorBuilder: (_, _) => const Divider(color: Colors.white10),
       itemBuilder: (context, index) {
         final m = _members[index];
         return Padding(

@@ -593,7 +593,7 @@ class _TaskEditSheetState extends State<TaskEditSheet> {
           Switch(
             value: isAlarmEnabled,
             onChanged: (v) => setState(() => isAlarmEnabled = v),
-            activeColor: Colors.orangeAccent,
+            activeThumbColor: Colors.orangeAccent,
           ),
         ],
       ),
@@ -616,7 +616,7 @@ class _TaskEditSheetState extends State<TaskEditSheet> {
               Switch(
                 value: isRecurring,
                 onChanged: (v) => setState(() => isRecurring = v),
-                activeColor: Colors.white,
+                activeThumbColor: Colors.white,
               ),
             ],
           ),
