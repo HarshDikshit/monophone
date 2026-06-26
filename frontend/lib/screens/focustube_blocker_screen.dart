@@ -7,6 +7,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/blocker_service.dart';
 import '../services/launcher_state.dart';
+import '../widgets/battery_dialog.dart';
 
 class FocusTubeBlockerScreen extends StatefulWidget {
   const FocusTubeBlockerScreen({super.key});
@@ -477,6 +478,9 @@ class _FocusTubeBlockerScreenState extends State<FocusTubeBlockerScreen> {
               (val) async {
                 if (_isLocked) return;
                 if (val) {
+                  // Ensure battery is unrestricted so blocking service survives
+                  final batteryOk = await BatteryOptimizationDialog.showIfNeeded();
+                  if (!batteryOk) return;
                   final enabled = await context.read<LauncherState>().isAccessibilityServiceEnabled();
                   if (!enabled) {
                     _showAccessibilityPermissionDialog();
@@ -499,6 +503,9 @@ class _FocusTubeBlockerScreenState extends State<FocusTubeBlockerScreen> {
               (val) async {
                 if (_isLocked) return;
                 if (val) {
+                  // Ensure battery is unrestricted so blocking service survives
+                  final batteryOk = await BatteryOptimizationDialog.showIfNeeded();
+                  if (!batteryOk) return;
                   final enabled = await context.read<LauncherState>().isAccessibilityServiceEnabled();
                   if (!enabled) {
                     _showAccessibilityPermissionDialog();

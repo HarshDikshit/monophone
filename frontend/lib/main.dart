@@ -46,6 +46,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: LauncherState.navigatorKey,
       title: 'Focus Launcher',
       debugShowCheckedModeBanner: false,
       builder: (context, child) {

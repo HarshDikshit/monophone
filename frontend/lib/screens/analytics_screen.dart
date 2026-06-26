@@ -427,10 +427,6 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                             ),
                           ),
                           const SizedBox(height: 16),
-                          if (state.showBatteryPrompt) ...[
-                            _BatteryPromptCard(state: state),
-                            const SizedBox(height: 16),
-                          ],
                           _SummaryStats(window: window),
                           const SizedBox(height: 18),
                           if (_mode == _RangeMode.day) ...[
@@ -495,72 +491,6 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
 
   bool _isSameDay(DateTime a, DateTime b) =>
       a.year == b.year && a.month == b.month && a.day == b.day;
-}
-
-// ── Battery Prompt Card ──────────────────────────────────────────
-class _BatteryPromptCard extends StatelessWidget {
-  final LauncherState state;
-  const _BatteryPromptCard({required this.state});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFF151500),
-        border: Border.all(color: Colors.orange.withOpacity(0.3)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.battery_alert, color: Colors.orange, size: 20),
-              const SizedBox(width: 8),
-              const Text(
-                'BATTERY OPTIMIZED',
-                style: TextStyle(
-                  color: Colors.orange,
-                  fontFamily: 'monospace',
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const Spacer(),
-              IconButton(
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
-                icon: const Icon(Icons.close, color: _dim, size: 16),
-                onPressed: state.dismissBatteryPrompt,
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'To ensure reliable focus tracking in the background, please set the app battery usage to "Unrestricted" in system settings.',
-            style: TextStyle(color: _text, fontSize: 13, height: 1.4),
-          ),
-          const SizedBox(height: 12),
-          TextButton(
-            style: TextButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              backgroundColor: Colors.orange.withOpacity(0.1),
-              side: BorderSide(color: Colors.orange.withOpacity(0.3)),
-            ),
-            onPressed: state.requestIgnoreBatteryOptimizations,
-            child: const Text(
-              'OPEN SETTINGS',
-              style: TextStyle(
-                color: Colors.orange,
-                fontFamily: 'monospace',
-                fontSize: 11,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 // ── Summary Stats ──────────────────────────────────────────────────

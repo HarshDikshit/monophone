@@ -53,9 +53,7 @@ class LauncherState extends ChangeNotifier {
 
   // Battery Optimization State
   bool _isBatteryOptimizationIgnored = true;
-  bool _showBatteryPrompt = false;
   bool get isBatteryOptimizationIgnored => _isBatteryOptimizationIgnored;
-  bool get showBatteryPrompt => _showBatteryPrompt;
 
   Map<String, int> _weeklyStudyData = {};
   Map<String, int> get weeklyStudyData => _weeklyStudyData;
@@ -919,18 +917,12 @@ class LauncherState extends ChangeNotifier {
       return;
     }
 
-    // Demand battery unrestricted mode via a sweet, clear dialog.
-    // The user must manually set it or explicitly choose to continue without it.
+    // Demand battery unrestricted mode via a hard-block dialog.
+    // Timer will NOT start unless the user enables Unrestricted mode.
     final batteryOk = await BatteryOptimizationDialog.showIfNeeded();
 
     if (!batteryOk) {
-      // User chose "Continue anyway" - allow them to proceed
-    }
-
-    await checkBatteryOptimizationStatus();
-    if (!_isBatteryOptimizationIgnored) {
-      _showBatteryPrompt = true;
-      notifyListeners();
+      // User cancelled — do not start the timer
       return;
     }
 
@@ -1655,9 +1647,6 @@ class LauncherState extends ChangeNotifier {
           await _channel.invokeMethod<bool>('isBatteryOptimizationIgnored') ??
           true;
       _isBatteryOptimizationIgnored = ignored;
-      if (!ignored) {
-        _showBatteryPrompt = true;
-      }
       notifyListeners();
     } catch (_) {}
   }
@@ -1665,7 +1654,6 @@ class LauncherState extends ChangeNotifier {
   Future<void> requestIgnoreBatteryOptimizations() async {
     try {
       await _channel.invokeMethod('requestIgnoreBatteryOptimizations');
-      _showBatteryPrompt = false;
       notifyListeners();
       // Check again after a delay
       Future.delayed(
@@ -1673,11 +1661,6 @@ class LauncherState extends ChangeNotifier {
         checkBatteryOptimizationStatus,
       );
     } catch (_) {}
-  }
-
-  void dismissBatteryPrompt() {
-    _showBatteryPrompt = false;
-    notifyListeners();
   }
 
   // ── Permissions ──
