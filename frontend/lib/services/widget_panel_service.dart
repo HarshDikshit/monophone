@@ -8,7 +8,7 @@ enum PanelWidgetType {
   clock,
   scratchpad,
   analytics,
-  barChart,
+  taskBlocks,    // Replaces barChart - shows plan day tasks with play/pause/stop
   taskBreakdown,
   quickActions,
   motivation,
@@ -25,8 +25,8 @@ extension PanelWidgetTypeExtension on PanelWidgetType {
         return 'THOUGHT DUMP';
       case PanelWidgetType.analytics:
         return 'STUDY ANALYTICS';
-      case PanelWidgetType.barChart:
-        return '7-DAY CHART';
+      case PanelWidgetType.taskBlocks:
+        return 'TASK BLOCKS';
       case PanelWidgetType.taskBreakdown:
         return 'TASK BREAKDOWN';
       case PanelWidgetType.quickActions:
@@ -48,8 +48,8 @@ extension PanelWidgetTypeExtension on PanelWidgetType {
         return Icons.edit_note;
       case PanelWidgetType.analytics:
         return Icons.analytics;
-      case PanelWidgetType.barChart:
-        return Icons.bar_chart;
+      case PanelWidgetType.taskBlocks:
+        return Icons.list_alt;
       case PanelWidgetType.taskBreakdown:
         return Icons.task_alt;
       case PanelWidgetType.quickActions:
@@ -71,8 +71,8 @@ extension PanelWidgetTypeExtension on PanelWidgetType {
         return 'Free-form text notes that persist';
       case PanelWidgetType.analytics:
         return 'Focus, distracted & ratio stats';
-      case PanelWidgetType.barChart:
-        return '7-day study focus bar chart';
+      case PanelWidgetType.taskBlocks:
+        return 'Plan day tasks with play/pause/stop controls & live focus time';
       case PanelWidgetType.taskBreakdown:
         return 'Time distribution by task';
       case PanelWidgetType.quickActions:
@@ -247,8 +247,8 @@ class WidgetPanelService extends ChangeNotifier {
         order: 1,
       ),
       WidgetPanelEntry(
-        id: 'default_barchart',
-        type: PanelWidgetType.barChart,
+        id: 'default_taskblocks',
+        type: PanelWidgetType.taskBlocks,
         order: 2,
       ),
       WidgetPanelEntry(
