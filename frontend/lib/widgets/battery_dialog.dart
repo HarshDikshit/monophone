@@ -1,35 +1,35 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../services/launcher_state.dart';
 
-/// A sweet, simple, non-dismissible dialog that demands the user
-/// set battery optimization to "Unrestricted" before starting the focus timer.
-/// 
-/// This ensures the timer doesn't get killed by the system in the background.
+/// Full-screen dialog that HARD-BLOCKS the focus timer until the user
+/// enables "Unrestricted" battery mode for Monophone.
+///
+/// No "Continue anyway" option — the user must either:
+/// 1. Go to settings and enable Unrestricted mode, then come back
+/// 2. Cancel (returns false, timer will not start)
 class BatteryOptimizationDialog extends StatefulWidget {
   final LauncherState state;
 
   const BatteryOptimizationDialog({super.key, required this.state});
 
-  /// Shows the dialog. Returns true if the user resolved the battery issue,
-  /// false if they chose to continue anyway (or cancelled).
-  /// Uses the global navigator key from [LauncherState] so it can be shown
-  /// even from services without a BuildContext.
+  /// Shows the battery optimization dialog (for focus timer start).
+  /// Returns true only if battery is set to unrestricted.
+  /// Uses the global navigator key from [LauncherState].
   static Future<bool> showIfNeeded() async {
-    // Get context from global navigator
     final navKey = LauncherState.navigatorKey;
     if (navKey.currentContext == null) return false;
     final context = navKey.currentContext!;
     final state = Provider.of<LauncherState>(context, listen: false);
 
-    // Check current status
     await state.checkBatteryOptimizationStatus();
     if (state.isBatteryOptimizationIgnored) return true;
 
     if (!context.mounted) return false;
     final result = await showDialog<bool>(
       context: context,
-      barrierDismissible: false, // Cannot dismiss by tapping outside
+      barrierDismissible: false,
       useSafeArea: false,
       builder: (ctx) => BatteryOptimizationDialog(state: state),
     );
@@ -37,16 +37,27 @@ class BatteryOptimizationDialog extends StatefulWidget {
   }
 
   @override
-  State<BatteryOptimizationDialog> createState() => _BatteryOptimizationDialogState();
+  State<BatteryOptimizationDialog> createState() =>
+      _BatteryOptimizationDialogState();
 }
 
-class _BatteryOptimizationDialogState extends State<BatteryOptimizationDialog> {
+class _BatteryOptimizationDialogState
+    extends State<BatteryOptimizationDialog> {
   bool _checking = false;
   bool _resolved = false;
 
   Future<void> _openSettings() async {
     setState(() => _checking = true);
-    await widget.state.requestIgnoreBatteryOptimizations();
+    // Open the Monophone app info page in system settings
+    try {
+      await MethodChannel('com.dixit.monophone/launcher')
+          .invokeMethod('openAppSettings', {
+        'packageName': 'com.dixit.monophone',
+      });
+    } catch (_) {
+      // Fallback: request battery optimization ignore
+      await widget.state.requestIgnoreBatteryOptimizations();
+    }
     // Wait a moment for the settings to take effect
     await Future.delayed(const Duration(seconds: 2));
     await widget.state.checkBatteryOptimizationStatus();
@@ -72,7 +83,7 @@ class _BatteryOptimizationDialogState extends State<BatteryOptimizationDialog> {
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      canPop: _resolved, // Only allow back if resolved
+      canPop: _resolved,
       child: Scaffold(
         backgroundColor: Colors.black,
         body: SafeArea(
@@ -228,19 +239,24 @@ class _BatteryOptimizationDialogState extends State<BatteryOptimizationDialog> {
                     ),
                     const SizedBox(height: 12),
 
-                    // Continue anyway (dimmed, smaller)
+                    // Cancel button — returns false, timer will NOT start
                     GestureDetector(
                       onTap: () => Navigator.pop(context, false),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        child: Text(
-                          'CONTINUE ANYWAY',
-                          style: TextStyle(
-                            color: Colors.grey[800],
-                            fontFamily: 'monospace',
-                            fontSize: 10,
-                            letterSpacing: 1,
-                            decoration: TextDecoration.underline,
+                      child: Container(
+                        width: double.infinity,
+                        height: 48,
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.white24),
+                        ),
+                        child: const Center(
+                          child: Text(
+                            'CANCEL',
+                            style: TextStyle(
+                              color: Colors.white54,
+                              fontFamily: 'monospace',
+                              fontSize: 11,
+                              letterSpacing: 2,
+                            ),
                           ),
                         ),
                       ),

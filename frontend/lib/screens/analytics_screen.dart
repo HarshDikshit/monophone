@@ -8,6 +8,7 @@ import 'package:share_plus/share_plus.dart';
 import '../services/api_service.dart';
 import '../services/launcher_state.dart';
 import '../services/auth_guard.dart';
+import '../services/task_planner_service.dart';
 
 // ====================================================================
 //  AnalyticsScreen – Monochrome (white/grey/black) design
@@ -40,7 +41,7 @@ class AnalyticsScreen extends StatefulWidget {
 
 class _AnalyticsScreenState extends State<AnalyticsScreen> {
   _RangeMode _mode = _RangeMode.day;
-  int _offset = 0; // navigation offset (0 = most recent period)
+  final int _offset = 0; // navigation offset (0 = most recent period)
   Map<String, dynamic>? _analytics;
   bool _loading = true;
   String? _error;
@@ -131,15 +132,16 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           mimeType: 'image/png',
           name: 'analytics.png',
         ),
-      ], text: 'My Study Analytics');
+      ], text: 'My Focus Analytics');
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Failed to share analytics'),
             backgroundColor: Colors.black,
           ),
         );
+      }
     }
   }
 
@@ -183,11 +185,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
 
     // For today, use local task focusSeconds (accurate per-tick count)
     if (dateStr == todayKey) {
-      int taskFocusSum = 0;
-      for (final t in state.planner?.tasks ?? []) {
-        taskFocusSum += (t.focusSeconds as num).toInt();
-      }
-      return taskFocusSum;
+      return state.studySeconds;
     }
 
     // For past days, sum up sessions' actualSeconds (committed per-tick data)
@@ -227,14 +225,20 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       if (key == todayKey) {
         // Overlay local planner data onto backend data for realtime accuracy
         final localTasks = state.planner?.tasks ?? [];
-        taskAnalytics = localTasks
-            .where((t) => t.focusSeconds > 0)
-            .map((t) => {
-                  'taskId': t.id,
-                  'title': t.title,
-                  'seconds': t.focusSeconds,
-                  'tag': t.tag.name.toUpperCase(),
-                })
+        taskAnalytics = state.taskStudySeconds.entries
+            .where((e) => e.value > 0)
+            .map((e) {
+              final t = localTasks.cast<TimeBlockTask?>().firstWhere(
+                (task) => task?.id == e.key,
+                orElse: () => null,
+              );
+              return {
+                'taskId': e.key,
+                'title': t?.title ?? 'Focused Session',
+                'seconds': e.value,
+                'tag': t?.tag.name.toUpperCase() ?? 'FOCUS',
+              };
+            })
             .toList();
       }
 
@@ -423,10 +427,6 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                             ),
                           ),
                           const SizedBox(height: 16),
-                          if (state.showBatteryPrompt) ...[
-                            _BatteryPromptCard(state: state),
-                            const SizedBox(height: 16),
-                          ],
                           _SummaryStats(window: window),
                           const SizedBox(height: 18),
                           if (_mode == _RangeMode.day) ...[
@@ -493,72 +493,6 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       a.year == b.year && a.month == b.month && a.day == b.day;
 }
 
-// ── Battery Prompt Card ──────────────────────────────────────────
-class _BatteryPromptCard extends StatelessWidget {
-  final LauncherState state;
-  const _BatteryPromptCard({required this.state});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFF151500),
-        border: Border.all(color: Colors.orange.withOpacity(0.3)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.battery_alert, color: Colors.orange, size: 20),
-              const SizedBox(width: 8),
-              const Text(
-                'BATTERY OPTIMIZED',
-                style: TextStyle(
-                  color: Colors.orange,
-                  fontFamily: 'monospace',
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const Spacer(),
-              IconButton(
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
-                icon: const Icon(Icons.close, color: _dim, size: 16),
-                onPressed: state.dismissBatteryPrompt,
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'To ensure reliable focus tracking in the background, please set the app battery usage to "Unrestricted" in system settings.',
-            style: TextStyle(color: _text, fontSize: 13, height: 1.4),
-          ),
-          const SizedBox(height: 12),
-          TextButton(
-            style: TextButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              backgroundColor: Colors.orange.withOpacity(0.1),
-              side: BorderSide(color: Colors.orange.withOpacity(0.3)),
-            ),
-            onPressed: state.requestIgnoreBatteryOptimizations,
-            child: const Text(
-              'OPEN SETTINGS',
-              style: TextStyle(
-                color: Colors.orange,
-                fontFamily: 'monospace',
-                fontSize: 11,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 // ── Summary Stats ──────────────────────────────────────────────────
 class _SummaryStats extends StatelessWidget {
   final _DateWindow window;
@@ -591,11 +525,12 @@ class _SummaryStats extends StatelessWidget {
   }
 
   List<_StatData> _getStats(LauncherState state, _DateWindow window) {
-    if (window.days.isEmpty)
+    if (window.days.isEmpty) {
       return [
         _StatData(label: 'Focus Time', value: '0h', subValue: '0m'),
         _StatData(label: 'Tasks Done', value: '0', subValue: 'completed'),
       ];
+    }
 
     final firstDayStr = window.days.first['date'] as String;
     final lastDayStr = window.days.last['date'] as String;
@@ -1363,7 +1298,7 @@ class _CardShell extends StatelessWidget {
                 ),
               ),
               const Spacer(),
-              if (trailing != null) trailing!,
+              ?trailing,
             ],
           ),
           child,
@@ -1429,7 +1364,7 @@ class _TaskAnalyticsCard extends StatelessWidget {
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             itemCount: sortedTasks.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 12),
+            separatorBuilder: (_, _) => const SizedBox(height: 12),
             itemBuilder: (context, index) {
               final task = sortedTasks[index].value;
               final totalStudy = window.totalStudySeconds.clamp(1, 1000000);
@@ -1825,7 +1760,7 @@ class _FocusTimeBarCardState extends State<_FocusTimeBarCard> {
   @override
   Widget build(BuildContext context) {
     final days = widget.days;
-    if (days.isEmpty)
+    if (days.isEmpty) {
       return _CardShell(
         title: 'Focus Time',
         child: const Padding(
@@ -1836,6 +1771,7 @@ class _FocusTimeBarCardState extends State<_FocusTimeBarCard> {
           ),
         ),
       );
+    }
 
     final values = days
         .map((d) => (((d['studySeconds'] as num?) ?? 0).toInt()) / 3600.0)

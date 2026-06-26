@@ -438,22 +438,33 @@ class _AnalyticsWidgetState extends State<_AnalyticsWidget> {
 }
 
 // ---------------------------------------------------------------------------
-// 7-DAY BAR CHART WIDGET
+// TASK BLOCKS WIDGET
 // ---------------------------------------------------------------------------
-class _BarChartWidget extends StatelessWidget {
-  const _BarChartWidget();
+class _TaskBlocksWidget extends StatelessWidget {
+  const _TaskBlocksWidget();
+
+  String _fmtDuration(int seconds) {
+    if (seconds <= 0) return '0m';
+    final h = seconds ~/ 3600;
+    final m = (seconds % 3600) ~/ 60;
+    return h > 0 ? '${h}h ${m}m' : '${m}m';
+  }
 
   @override
   Widget build(BuildContext context) {
     final state = Provider.of<LauncherState>(context);
-    final data = state.weeklyStudyData;
+    final planner = state.planner;
+    final now = DateTime.now();
+    final todayTasks = (planner?.tasksForDate(now) ?? [])
+        .where((t) => !t.isCompleted)
+        .toList();
 
-    if (data.isEmpty) {
+    if (todayTasks.isEmpty) {
       return Container(
-        height: 80,
+        padding: const EdgeInsets.symmetric(vertical: 16),
         alignment: Alignment.center,
         child: const Text(
-          'NO DATA AVAILABLE',
+          'NO TASKS TODAY',
           style: TextStyle(
             color: Colors.white24,
             fontSize: 11,
@@ -463,76 +474,136 @@ class _BarChartWidget extends StatelessWidget {
       );
     }
 
-    final keys = data.keys.toList();
-    final values = data.values.toList();
-    final maxMins = values
-        .map((s) => s / 60.0)
-        .fold<double>(0.0, (a, b) => b > a ? b : a);
-    const weekdayLetters = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const Text(
-          '7-DAY STUDY FOCUS (MINS)',
+          "TODAY'S TASKS",
           style: TextStyle(
-            color: Colors.white60,
+            color: Colors.white,
             fontFamily: 'monospace',
-            fontSize: 10,
+            fontSize: 12,
             fontWeight: FontWeight.bold,
             letterSpacing: 1,
           ),
         ),
         const SizedBox(height: 8),
-        Container(
-          height: 80,
-          padding: const EdgeInsets.symmetric(horizontal: 4),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: List.generate(keys.length, (index) {
-              final mins = values[index] / 60.0;
-              DateTime? dt;
-              try {
-                dt = DateTime.parse(keys[index]);
-              } catch (_) {}
-              final dayLetter = dt != null
-                  ? weekdayLetters[dt.weekday % 7]
-                  : '?';
-              final pct = maxMins > 0
-                  ? (mins / maxMins).clamp(0.02, 1.0)
-                  : 0.02;
-              return Expanded(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    Expanded(
-                      child: Align(
-                        alignment: Alignment.bottomCenter,
-                        child: FractionallySizedBox(
-                          heightFactor: pct,
-                          child: Container(
-                            margin: const EdgeInsets.symmetric(horizontal: 4),
-                            decoration: BoxDecoration(color: Colors.white30),
-                          ),
+        ...todayTasks.map((task) {
+          final isActive = state.activeTaskId == task.id;
+          final isRunning = state.isFocusActive && isActive;
+          final scheduledMinutes = task.durationMinutes;
+          final focusSeconds = task.focusSeconds;
+          final isDone = task.isCompleted;
+
+          return Container(
+            key: ValueKey(task.id),
+            margin: const EdgeInsets.only(bottom: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            decoration: BoxDecoration(
+              color: isActive
+                  ? Colors.white.withOpacity(0.06)
+                  : Colors.transparent,
+              border: Border.all(
+                color: isActive ? Colors.white38 : Colors.white10,
+              ),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        task.title,
+                        style: TextStyle(
+                          color: isDone
+                              ? Colors.green.withOpacity(0.6)
+                              : (isActive ? Colors.white : Colors.white70),
+                          fontFamily: 'monospace',
+                          fontSize: 11,
+                          fontWeight: isActive
+                              ? FontWeight.bold
+                              : FontWeight.normal,
+                          decoration: isDone
+                              ? TextDecoration.lineThrough
+                              : null,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${_fmtDuration(focusSeconds)} / ${scheduledMinutes}m',
+                        style: TextStyle(
+                          color: focusSeconds > 0
+                              ? Colors.greenAccent.withOpacity(0.7)
+                              : Colors.white30,
+                          fontFamily: 'monospace',
+                          fontSize: 9,
                         ),
                       ),
+                    ],
+                  ),
+                ),
+                GestureDetector(
+                  onTap: isRunning
+                      ? null
+                      : () {
+                          state.switchActiveTask(
+                            isActive ? null : task.id,
+                            taskName: task.title,
+                          );
+                          if (!state.isFocusActive) {
+                            state.startFocusTimer();
+                          }
+                        },
+                  child: Container(
+                    width: 28,
+                    height: 28,
+                    margin: const EdgeInsets.only(left: 4),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: isRunning ? Colors.white24 : Colors.white12,
+                      ),
+                      color: isRunning
+                          ? Colors.white.withOpacity(0.1)
+                          : Colors.transparent,
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      dayLetter,
-                      style: const TextStyle(
-                        color: Colors.white30,
-                        fontSize: 8,
-                        fontFamily: 'monospace',
+                    child: Icon(
+                      isRunning ? Icons.pause : Icons.play_arrow,
+                      color: isRunning ? Colors.white : Colors.greenAccent,
+                      size: 16,
+                    ),
+                  ),
+                ),
+                if (isRunning)
+                  GestureDetector(
+                    onTap: () {
+                      state.stopFocusTimer(manual: true);
+                      state.switchActiveTask(null);
+                    },
+                    child: Container(
+                      width: 28,
+                      height: 28,
+                      margin: const EdgeInsets.only(left: 4),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: Colors.redAccent.withOpacity(0.5),
+                        ),
+                      ),
+                      child: const Icon(
+                        Icons.stop,
+                        color: Colors.redAccent,
+                        size: 14,
                       ),
                     ),
-                  ],
-                ),
-              );
-            }),
-          ),
-        ),
+                  ),
+              ],
+            ),
+          );
+        }),
       ],
     );
   }
@@ -752,7 +823,7 @@ class _SystemInfoWidgetState extends State<_SystemInfoWidget> {
 }
 
 // ---------------------------------------------------------------------------
-// ANDROID APP WIDGET — Placeholder (native view hosted via AndroidView)
+// ANDROID APP WIDGET
 // ---------------------------------------------------------------------------
 class _AndroidAppWidget extends StatelessWidget {
   final int appWidgetId;
@@ -785,9 +856,8 @@ class _AndroidAppWidget extends StatelessWidget {
               ),
             ),
           ),
-          // AndroidView widget — hosts the actual native app widget
           SizedBox(
-            height: 200, // Default height, widgets will resize
+            height: 200,
             child: AndroidView(
               viewType: 'com.dixit.monophone/app_widget',
               creationParams: {'appWidgetId': appWidgetId},
@@ -866,7 +936,6 @@ class _AddWidgetOverlayState extends State<_AddWidgetOverlay> {
               Expanded(
                 child: ListView(
                   children: [
-                    // System widgets section
                     if (availableTypes.isNotEmpty) ...[
                       const Text(
                         'LAUNCHER WIDGETS',
@@ -945,7 +1014,6 @@ class _AddWidgetOverlayState extends State<_AddWidgetOverlay> {
                     const Divider(color: Colors.white10),
                     const SizedBox(height: 12),
 
-                    // Android AppWidgets section
                     const Text(
                       'ANDROID APP WIDGETS',
                       style: TextStyle(
@@ -1096,8 +1164,8 @@ Widget _buildWidgetByType(WidgetPanelEntry entry) {
       return const _ScratchpadWidget();
     case PanelWidgetType.analytics:
       return const _AnalyticsWidget();
-    case PanelWidgetType.barChart:
-      return const _BarChartWidget();
+    case PanelWidgetType.taskBlocks:
+      return const _TaskBlocksWidget();
     case PanelWidgetType.taskBreakdown:
       return const _TaskBreakdownWidget();
     case PanelWidgetType.quickActions:
@@ -1128,6 +1196,7 @@ class WidgetPanel extends StatefulWidget {
 
 class _WidgetPanelState extends State<WidgetPanel> {
   late WidgetPanelService _panelService;
+  bool _editMode = false;
 
   @override
   void initState() {
@@ -1183,7 +1252,6 @@ class _WidgetPanelState extends State<WidgetPanel> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Header — always shows manage (+), close (X)
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
@@ -1234,7 +1302,45 @@ class _WidgetPanelState extends State<WidgetPanel> {
                 ),
                 const SizedBox(height: 8),
 
-                // Widget list
+                if (_editMode)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: GestureDetector(
+                      onTap: () => setState(() => _editMode = false),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          vertical: 6,
+                          horizontal: 12,
+                        ),
+                        decoration: BoxDecoration(
+                          border: Border.all(
+                            color: Colors.redAccent.withOpacity(0.4),
+                          ),
+                          color: Colors.redAccent.withOpacity(0.05),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: const [
+                            Icon(
+                              Icons.close,
+                              color: Colors.redAccent,
+                              size: 14,
+                            ),
+                            SizedBox(width: 6),
+                            Text(
+                              'TAP TO EXIT EDIT MODE',
+                              style: TextStyle(
+                                color: Colors.redAccent,
+                                fontFamily: 'monospace',
+                                fontSize: 9,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+
                 Expanded(
                   child: _panelService.entries.isEmpty
                       ? Center(
@@ -1329,7 +1435,6 @@ class _WidgetPanelState extends State<WidgetPanel> {
                         ),
                 ),
 
-                // Footer
                 Center(
                   child: Text(
                     'SWIPE RIGHT TO RETURN',
@@ -1371,65 +1476,65 @@ class _WidgetPanelState extends State<WidgetPanel> {
   Widget _buildWidgetCard(WidgetPanelEntry entry, int index) {
     return Container(
       key: ValueKey(entry.id),
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        border: Border.all(color: Colors.white10),
-        color: Colors.white.withOpacity(0.01),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // Always-visible header with drag handle, label, and remove button
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-            decoration: const BoxDecoration(
-              border: Border(bottom: BorderSide(color: Colors.white10)),
-            ),
-            child: Row(
-              children: [
-                // Drag handle (always visible, only functional for reorder via ReorderableListView)
-                Icon(Icons.drag_handle, color: Colors.white38, size: 20),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    entry.type.displayName,
-                    style: const TextStyle(
-                      color: Colors.white38,
-                      fontFamily: 'monospace',
-                      fontSize: 10,
-                      letterSpacing: 1,
-                    ),
-                  ),
-                ),
-                // Remove button (always visible)
-                GestureDetector(
-                  onTap: () => _panelService.removeWidget(entry.id),
-                  child: Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: Colors.redAccent.withOpacity(0.5),
+        margin: const EdgeInsets.only(bottom: 12),
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.white10),
+          color: Colors.white.withOpacity(0.01),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              decoration: BoxDecoration(
+                border: Border(bottom: BorderSide(color: Colors.white10)),
+                color: _editMode
+                    ? Colors.redAccent.withOpacity(0.05)
+                    : Colors.transparent,
+              ),
+              child: Row(
+                children: [
+                  if (_editMode)
+                    Icon(Icons.drag_handle, color: Colors.white60, size: 20),
+                  if (_editMode) const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      entry.type.displayName,
+                      style: TextStyle(
+                        color: _editMode ? Colors.white : Colors.white24,
+                        fontFamily: 'monospace',
+                        fontSize: 10,
+                        letterSpacing: 1,
                       ),
                     ),
-                    child: const Icon(
-                      Icons.close,
-                      color: Colors.redAccent,
-                      size: 14,
-                    ),
                   ),
-                ),
-              ],
+                  if (_editMode)
+                    GestureDetector(
+                      onTap: () => _panelService.removeWidget(entry.id),
+                      child: Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: Colors.redAccent.withOpacity(0.5),
+                          ),
+                        ),
+                        child: const Icon(
+                          Icons.close,
+                          color: Colors.redAccent,
+                          size: 14,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
-          ),
-
-          // Widget body
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: _buildWidgetByType(entry),
-          ),
-        ],
-      ),
-    );
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: _buildWidgetByType(entry),
+            ),
+          ],
+        ),
+      );
   }
 }

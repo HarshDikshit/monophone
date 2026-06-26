@@ -146,7 +146,7 @@ class TimeBlockTask {
     isCompleted: isCompleted ?? this.isCompleted,
     isAlarmEnabled: isAlarmEnabled ?? this.isAlarmEnabled,
     focusSeconds: focusSeconds ?? this.focusSeconds,
-    completedAt: completedAt ?? this.completedAt,
+    completedAt: completedAt ?? completedAt,
   );
 }
 
@@ -245,7 +245,7 @@ class TaskPlannerService extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> _persist() async {
+  Future<void> persist() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
       _storageKey,
@@ -256,7 +256,7 @@ class TaskPlannerService extends ChangeNotifier {
   Future<void> addTask(TimeBlockTask task) async {
     _tasks.add(task);
     _tasks.sort((a, b) => a.startTime.compareTo(b.startTime));
-    await _persist();
+      await persist();
     notifyListeners();
   }
 
@@ -264,14 +264,14 @@ class TaskPlannerService extends ChangeNotifier {
     final idx = _tasks.indexWhere((t) => t.id == task.id);
     if (idx >= 0) {
       _tasks[idx] = task;
-      await _persist();
+      await persist();
       notifyListeners();
     }
   }
 
   Future<void> removeTask(String id) async {
     _tasks.removeWhere((t) => t.id == id);
-    await _persist();
+    await persist();
     notifyListeners();
   }
 
@@ -281,17 +281,17 @@ class TaskPlannerService extends ChangeNotifier {
       final isDone = !_tasks[idx].isCompleted;
       _tasks[idx].isCompleted = isDone;
       _tasks[idx].completedAt = isDone ? DateTime.now() : null;
-      await _persist();
+      await persist();
       notifyListeners();
     }
   }
 
-  Future<void> addFocusSeconds(String id, int seconds, {bool persist = true}) async {
+  Future<void> addFocusSeconds(String id, int seconds, {bool persistToDisk = true}) async {
     final idx = _tasks.indexWhere((t) => t.id == id);
     if (idx >= 0) {
       _tasks[idx].focusSeconds += seconds;
-      if (persist) {
-        await _persist();
+      if (persistToDisk) {
+        await persist();
       }
       notifyListeners();
     }
@@ -358,7 +358,7 @@ class TaskPlannerService extends ChangeNotifier {
     _tasks.removeWhere(
       (t) => !t.isRecurring && t.isCompleted && t.startTime.isBefore(yesterday),
     );
-    await _persist();
+    await persist();
     notifyListeners();
   }
 }

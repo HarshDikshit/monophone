@@ -103,10 +103,6 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (state.showBatteryPrompt) ...[
-                _BatteryPromptCard(state: state),
-                const SizedBox(height: 16),
-              ],
               if (!isFullScreen) ...[
                 // ── Status label ──
                 Text(
@@ -510,7 +506,7 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
           Switch(
             value: value,
             onChanged: onChanged,
-            activeColor: Colors.white,
+            activeThumbColor: Colors.white,
             activeTrackColor: Colors.white38,
           ),
         ],
@@ -715,75 +711,4 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
   }
 }
 
-// ── Battery Prompt Card ──────────────────────────────────────────
-class _BatteryPromptCard extends StatelessWidget {
-  final LauncherState state;
-  const _BatteryPromptCard({required this.state});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFF151500),
-        border: Border.all(color: Colors.orange.withOpacity(0.3)),
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.battery_alert, color: Colors.orange, size: 20),
-              const SizedBox(width: 8),
-              const Text(
-                'BATTERY OPTIMIZED',
-                style: TextStyle(
-                  color: Colors.orange,
-                  fontFamily: 'monospace',
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const Spacer(),
-              IconButton(
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
-                icon: const Icon(Icons.close, color: Colors.white30, size: 16),
-                onPressed: state.dismissBatteryPrompt,
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'To ensure the timer doesn\'t stop in the background, set battery usage to "Unrestricted" in settings.',
-            style: TextStyle(
-              color: Colors.white70,
-              fontSize: 13,
-              height: 1.4,
-              fontFamily: 'monospace',
-            ),
-          ),
-          const SizedBox(height: 12),
-          TextButton(
-            style: TextButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              backgroundColor: Colors.orange.withOpacity(0.1),
-              side: BorderSide(color: Colors.orange.withOpacity(0.3)),
-            ),
-            onPressed: state.requestIgnoreBatteryOptimizations,
-            child: const Text(
-              'OPEN SETTINGS',
-              style: TextStyle(
-                color: Colors.orange,
-                fontFamily: 'monospace',
-                fontSize: 11,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
 

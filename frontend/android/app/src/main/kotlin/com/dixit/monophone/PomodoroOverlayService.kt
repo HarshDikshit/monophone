@@ -23,10 +23,9 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
-import android.widget.Button
 import android.widget.FrameLayout
+import android.widget.ImageButton
 import android.widget.LinearLayout
-import android.widget.ProgressBar
 import android.widget.RemoteViews
 import android.widget.TextView
 import androidx.core.app.NotificationCompat
@@ -65,27 +64,26 @@ class PomodoroOverlayService : Service() {
             if (isRunning && !isPaused) {
                 elapsedSeconds++
                 notifyTick()
-                updateUI()
-                // Always update notification every tick for persistent display
+                updateExpandedUI()
                 updateNotification()
             }
             handler.postDelayed(this, 1000)
         }
     }
 
-    // Views
-    private var isExpanded = false
-    private lateinit var shrunkView: LinearLayout
-    private lateinit var expandedView: LinearLayout
-    
-    private lateinit var shrunkText: TextView
-    
-    private lateinit var expHeader: TextView
-    private lateinit var expTaskText: TextView
-    private lateinit var expProgress: ProgressBar
-    private lateinit var expTimeText: TextView
-    private lateinit var expPlayPauseBtn: Button
-    private lateinit var expStopBtn: Button
+    // Expanded pill views
+    private lateinit var pillContainer: FrameLayout
+    private lateinit var expandedRoot: LinearLayout
+    private lateinit var playPauseBtn: ImageButton
+    private lateinit var stopBtn: ImageButton
+    private lateinit var collapseBtn: ImageButton
+    private lateinit var timerText: TextView
+    private lateinit var subtitleText: TextView
+
+    // Collapsed (shrunk) view — thin tab on left edge
+    private lateinit var collapsedRoot: LinearLayout
+    private lateinit var expandBtn: ImageButton
+    private var isCollapsed = false
 
     override fun onCreate() {
         super.onCreate()
@@ -111,16 +109,17 @@ class PomodoroOverlayService : Service() {
                 vibrationEnabled = intent.getBooleanExtra("vibrationEnabled", true)
                 isRunning = true
                 isPaused = false
+                isCollapsed = false
                 elapsedSeconds = startAt
                 
                 showOverlay()
-                updateUI()
+                updateExpandedUI()
                 startForeground(NOTIFICATION_ID, createNotification())
                 notifyStateChanged()
             }
             ACTION_PLAY_PAUSE -> {
                 isPaused = !isPaused
-                updateUI()
+                updateExpandedUI()
                 updateNotification()
                 notifyStateChanged()
             }
@@ -164,7 +163,6 @@ class PomodoroOverlayService : Service() {
                 isLooping = false
                 prepare()
                 start()
-                // Stop after 3 seconds
                 handler.postDelayed({
                     try {
                         if (isPlaying) { stop(); release() }
@@ -194,9 +192,7 @@ class PomodoroOverlayService : Service() {
         } catch (_: Exception) {}
     }
 
-    private fun handleTimerComplete() {
-        // No auto-completion in duration mode
-    }
+    private fun handleTimerComplete() {}
 
     private fun stopFocusTimer(manual: Boolean) {
         isRunning = false
@@ -242,151 +238,164 @@ class PomodoroOverlayService : Service() {
         } catch (_: Exception) {}
     }
 
-    // --- UI Layout programmatically ---
+    // ============================================================
+    //  UI — Two-State: Expanded Pill  ||  Collapsed Tab (left edge)
+    // ============================================================
     private fun setupViews() {
         val ctx = this
         overlayView = FrameLayout(ctx)
-        
         val dp = resources.displayMetrics.density
-        
-        // 1. Shrunk View Layout
-        shrunkView = LinearLayout(ctx).apply {
+
+        // ── Expanded Pill ──
+        expandedRoot = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            val pillWidth = (260 * dp).toInt()  // reduced from 300 to 260
+            val pillHeight = (52 * dp).toInt()
+            layoutParams = FrameLayout.LayoutParams(pillWidth, pillHeight)
+            background = createRoundedRectDrawable(
+                Color.parseColor("#FF000000"),
+                Color.parseColor("#3DFFFFFF"),
+                (1 * dp).toInt(),
+                (18 * dp)
+            )
+            setPadding((6 * dp).toInt(), 0, (4 * dp).toInt(), 0)
+            visibility = View.VISIBLE
+        }
+
+        // Row contents
+        // Left: Play/Pause
+        playPauseBtn = ImageButton(ctx).apply {
+            val btnSize = (34 * dp).toInt()  // slightly smaller
+            layoutParams = LinearLayout.LayoutParams(btnSize, btnSize).apply {
+                rightMargin = (4 * dp).toInt()
+            }
+            background = createCircleDrawable(
+                Color.parseColor("#1AFFFFFF"),
+                Color.parseColor("#40FFFFFF"),
+                (1 * dp).toInt()
+            )
+            scaleType = android.widget.ImageView.ScaleType.CENTER
+            setPadding(0, 0, 0, 0)
+            setImageDrawable(createPlayDrawable(Color.WHITE, (20 * dp()).toInt()))
+            setOnClickListener {
+                isPaused = !isPaused
+                updateExpandedUI()
+                updateNotification()
+                notifyStateChanged()
+            }
+        }
+        expandedRoot.addView(playPauseBtn)
+
+        // Middle: Timer Column (task name above, timer + subtitle below)
+        val timerColumn = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        // Task name label — truncated to 8 chars with "..."
+        val taskLabel = TextView(ctx).apply {
+            setTextColor(Color.parseColor("#AAFFFFFF"))  // slightly dimmer white
+            textSize = 9f
+            typeface = Typeface.MONOSPACE
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            // Store reference for dynamic updates
+            setTag("taskLabel")
+        }
+        timerColumn.addView(taskLabel)
+
+        timerText = TextView(ctx).apply {
+            setTextColor(Color.WHITE)
+            textSize = 15f  // slightly smaller
+            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+            text = "00:00"
+        }
+        timerColumn.addView(timerText)
+        subtitleText = TextView(ctx).apply {
+            setTextColor(Color.parseColor("#8AFFFFFF"))
+            textSize = 8f
+            typeface = Typeface.MONOSPACE
+            text = "Time focused"
+        }
+        timerColumn.addView(subtitleText)
+        expandedRoot.addView(timerColumn)
+
+        // Stop button (square with rounded corners, white "■" stop icon)
+        stopBtn = ImageButton(ctx).apply {
+            val btnSize = (32 * dp).toInt()
+            layoutParams = LinearLayout.LayoutParams(btnSize, btnSize).apply {
+                leftMargin = (4 * dp).toInt()
+                rightMargin = (4 * dp).toInt()
+            }
+            background = createRoundedRectDrawable(
+                Color.parseColor("#1AFFFFFF"),
+                Color.parseColor("#40FFFFFF"),
+                (1 * dp).toInt(),
+                (6 * dp)
+            )
+            scaleType = android.widget.ImageView.ScaleType.CENTER
+            setPadding(0, 0, 0, 0)
+            setImageDrawable(createStopDrawable(Color.WHITE, (18 * dp()).toInt()))
+            setOnClickListener {
+                stopFocusTimer(manual = true)
+            }
+        }
+        expandedRoot.addView(stopBtn)
+
+        // Collapse button (thin "—" minimize icon)
+        collapseBtn = ImageButton(ctx).apply {
+            val btnSize = (26 * dp).toInt()
+            layoutParams = LinearLayout.LayoutParams(btnSize, btnSize).apply {
+                leftMargin = (2 * dp).toInt()
+            }
+            background = null
+            scaleType = android.widget.ImageView.ScaleType.CENTER
+            setPadding(0, 0, 0, 0)
+            setImageDrawable(createMinimizeDrawable(Color.WHITE, (16 * dp()).toInt()))
+            setOnClickListener {
+                collapseOverlay()
+            }
+        }
+        expandedRoot.addView(collapseBtn)
+
+        // ── Collapsed View (thin tab on left edge with ">" arrow) ──
+        collapsedRoot = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            val size = (65 * dp).toInt()
-            layoutParams = FrameLayout.LayoutParams(size, size)
-            background = createCircleDrawable(Color.parseColor("#80000000"), Color.WHITE, (2 * dp).toInt())
-            
-            shrunkText = TextView(ctx).apply {
-                setTextColor(Color.WHITE)
-                textSize = 11f
-                typeface = Typeface.MONOSPACE
-                gravity = Gravity.CENTER
+            val tabW = (28 * dp).toInt()
+            val tabH = (60 * dp).toInt()
+            layoutParams = FrameLayout.LayoutParams(tabW, tabH)
+            background = createRoundedRectDrawable(
+                Color.parseColor("#FF000000"),
+                Color.parseColor("#3DFFFFFF"),
+                (1 * dp).toInt(),
+                (0 * dp) // no rounded corners on left edge — flush against screen edge
+            ).apply {
+                // Round only the right corners so it sticks flush to left edge
+                cornerRadii = floatArrayOf(0f, 0f, (10 * dp), (10 * dp), (10 * dp), (10 * dp), 0f, 0f)
             }
-            addView(shrunkText)
-        }
-        
-        // 2. Expanded View Layout
-        expandedView = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
-            val w = (220 * dp).toInt()
-            val h = (150 * dp).toInt()
-            layoutParams = FrameLayout.LayoutParams(w, h)
-            background = createRoundedRectDrawable(Color.parseColor("#F2000000"), Color.WHITE, (2 * dp).toInt(), 8 * dp)
-            setPadding((12 * dp).toInt(), (8 * dp).toInt(), (12 * dp).toInt(), (8 * dp).toInt())
             visibility = View.GONE
-            
-            // Header Row with status and shrink button
-            val headerRow = LinearLayout(ctx).apply {
-                orientation = LinearLayout.HORIZONTAL
-                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-                gravity = Gravity.CENTER_VERTICAL
-            }
-
-            expHeader = TextView(ctx).apply {
-                setTextColor(Color.GRAY)
-                textSize = 10f
-                typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
-                text = "POMODORO"
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            }
-            headerRow.addView(expHeader)
-
-            val shrinkBtn = Button(ctx).apply {
-                text = "-"
-                textSize = 12f
-                setTextColor(Color.WHITE)
-                setBackgroundColor(Color.TRANSPARENT)
-                val btnSize = (24 * dp).toInt()
-                layoutParams = LinearLayout.LayoutParams(btnSize, btnSize)
-                setPadding(0, 0, 0, 0)
-                setOnClickListener {
-                    toggleExpandedState()
-                }
-            }
-            headerRow.addView(shrinkBtn)
-            addView(headerRow)
-            
-            // Task text
-            expTaskText = TextView(ctx).apply {
-                setTextColor(Color.WHITE)
-                textSize = 13f
-                typeface = Typeface.MONOSPACE
-                setSingleLine()
-                ellipsize = android.text.TextUtils.TruncateAt.END
-                text = taskName
-                setPadding(0, (4 * dp).toInt(), 0, (4 * dp).toInt())
-            }
-            addView(expTaskText)
-            
-            // Horizontal progress bar
-            expProgress = ProgressBar(ctx, null, android.R.attr.progressBarStyleHorizontal).apply {
-                max = 25 * 60
-                progress = 0
-                progressDrawable = GradientDrawable().apply {
-                    setColor(Color.parseColor("#33FFFFFF"))
-                    cornerRadius = 2 * dp
-                }
-                setPadding(0, (4 * dp).toInt(), 0, (4 * dp).toInt())
-            }
-            addView(expProgress)
-            
-            // Time remaining text
-            expTimeText = TextView(ctx).apply {
-                setTextColor(Color.WHITE)
-                textSize = 14f
-                typeface = Typeface.MONOSPACE
-                gravity = Gravity.CENTER_HORIZONTAL
-                setPadding(0, (2 * dp).toInt(), 0, (6 * dp).toInt())
-            }
-            addView(expTimeText)
-            
-            // Row of Buttons
-            val btnRow = LinearLayout(ctx).apply {
-                orientation = LinearLayout.HORIZONTAL
-                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-            }
-            
-            expPlayPauseBtn = Button(ctx).apply {
-                text = "PAUSE"
-                typeface = Typeface.MONOSPACE
-                textSize = 10f
-                setTextColor(Color.BLACK)
-                setBackgroundColor(Color.WHITE)
-                layoutParams = LinearLayout.LayoutParams(0, (32 * dp).toInt(), 1f).apply {
-                    rightMargin = (4 * dp).toInt()
-                }
-                setOnClickListener {
-                    isPaused = !isPaused
-                    updateUI()
-                    updateNotification()
-                    notifyStateChanged()
-                }
-            }
-            btnRow.addView(expPlayPauseBtn)
-            
-            expStopBtn = Button(ctx).apply {
-                text = "STOP"
-                typeface = Typeface.MONOSPACE
-                textSize = 10f
-                setTextColor(Color.WHITE)
-                background = createRoundedRectDrawable(Color.TRANSPARENT, Color.WHITE, (1 * dp).toInt(), 2 * dp)
-                layoutParams = LinearLayout.LayoutParams(0, (32 * dp).toInt(), 1f).apply {
-                    leftMargin = (4 * dp).toInt()
-                }
-                setOnClickListener {
-                    stopFocusTimer(manual = true)
-                }
-            }
-            btnRow.addView(expStopBtn)
-            
-            addView(btnRow)
+            setPadding((4 * dp).toInt(), (6 * dp).toInt(), (2 * dp).toInt(), (6 * dp).toInt())
         }
-        
-        overlayView?.addView(shrunkView)
-        overlayView?.addView(expandedView)
-        
-        // Window parameters
+        expandBtn = ImageButton(ctx).apply {
+            val btnSize = (22 * dp).toInt()
+            layoutParams = LinearLayout.LayoutParams(btnSize, btnSize)
+            background = null
+            scaleType = android.widget.ImageView.ScaleType.CENTER
+            setPadding(0, 0, 0, 0)
+            setImageDrawable(createExpandArrowDrawable(Color.WHITE, (18 * dp()).toInt()))
+            setOnClickListener {
+                expandOverlay()
+            }
+        }
+        collapsedRoot.addView(expandBtn)
+
+        // Add both views to overlay
+        overlayView?.addView(expandedRoot)
+        overlayView?.addView(collapsedRoot)
+
+        // Window params
         params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -401,22 +410,20 @@ class PomodoroOverlayService : Service() {
             x = 100
             y = 150
         }
-        
-        // Dragging & Tapping gesture handling
+
+        // Dragging — shared for both states
         var initialX = 0
         var initialY = 0
         var initialTouchX = 0f
         var initialTouchY = 0f
-        var touchStartTime = 0L
-        
-        val touchListener = View.OnTouchListener { _, event ->
+
+        val dragListener = View.OnTouchListener { _, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     initialX = params.x
                     initialY = params.y
                     initialTouchX = event.rawX
                     initialTouchY = event.rawY
-                    touchStartTime = System.currentTimeMillis()
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
@@ -427,32 +434,31 @@ class PomodoroOverlayService : Service() {
                     overlayView?.let { windowManager.updateViewLayout(it, params) }
                     true
                 }
-                MotionEvent.ACTION_UP -> {
-                    val deltaX = event.rawX - initialTouchX
-                    val deltaY = event.rawY - initialTouchY
-                    val elapsed = System.currentTimeMillis() - touchStartTime
-                    if (elapsed < 200 && (deltaX * deltaX + deltaY * deltaY) < 100) {
-                        toggleExpandedState()
-                    }
-                    true
-                }
+                MotionEvent.ACTION_UP -> true
                 else -> false
             }
         }
-        
-        shrunkView.setOnTouchListener(touchListener)
-        expHeader.setOnTouchListener(touchListener)
+        expandedRoot.setOnTouchListener(dragListener)
+        collapsedRoot.setOnTouchListener(dragListener)
     }
 
-    private fun toggleExpandedState() {
-        isExpanded = !isExpanded
-        if (isExpanded) {
-            shrunkView.visibility = View.GONE
-            expandedView.visibility = View.VISIBLE
-        } else {
-            expandedView.visibility = View.GONE
-            shrunkView.visibility = View.VISIBLE
-        }
+    private fun collapseOverlay() {
+        isCollapsed = true
+        expandedRoot.visibility = View.GONE
+        collapsedRoot.visibility = View.VISIBLE
+        // Snap to left edge
+        params.x = 0
+        overlayView?.let { windowManager.updateViewLayout(it, params) }
+    }
+
+    private fun expandOverlay() {
+        isCollapsed = false
+        collapsedRoot.visibility = View.GONE
+        expandedRoot.visibility = View.VISIBLE
+        updateExpandedUI()
+        // Keep X position from collapsed state (snapped to left)
+        params.x = 0
+        overlayView?.let { windowManager.updateViewLayout(it, params) }
     }
 
     private fun showOverlay() {
@@ -467,26 +473,164 @@ class PomodoroOverlayService : Service() {
         }
     }
 
-    fun updateUI() {
+    fun updateExpandedUI() {
         val hours = elapsedSeconds / 3600
         val minutes = (elapsedSeconds % 3600) / 60
-        val seconds = elapsedSeconds % 60
-        val timeStr = if (hours > 0) String.format("%02d:%02d:%02d", hours, minutes, seconds)
-                      else String.format("%02d:%02d", minutes, seconds)
+        val secs = elapsedSeconds % 60
+        val timeStr = if (hours > 0) String.format("%02d:%02d:%02d", hours, minutes, secs)
+                      else String.format("%02d:%02d", minutes, secs)
         
-        shrunkText.text = "[$timeStr]"
+        timerText.text = timeStr
+        subtitleText.text = if (isPaused) "Paused" else "Time focused"
         
-        expHeader.text = "FOCUSING"
-        expTaskText.text = taskName
-        expTimeText.text = timeStr
+        // Update task label — truncate to 8 chars with "..."
+        val taskLabel = expandedRoot.findViewWithTag<TextView>("taskLabel")
+        if (taskLabel != null) {
+            val fullName = if (isPaused) taskName else taskName
+            taskLabel.text = if (fullName.length > 8) fullName.substring(0, 8) + "..." else fullName
+        }
         
-        // Progress bar: indefinite for simple duration tracking
-        expProgress.isIndeterminate = true
-        
-        expPlayPauseBtn.text = if (isPaused) "PLAY" else "PAUSE"
+        // Replace the drawable properly — center the icon
+        playPauseBtn.setImageDrawable(null)
+        if (isPaused) {
+            playPauseBtn.setImageDrawable(createPlayDrawable(Color.WHITE, (22 * dp()).toInt()))
+        } else {
+            playPauseBtn.setImageDrawable(createPauseDrawable(Color.WHITE, (22 * dp()).toInt()))
+        }
     }
 
-    // --- Custom Persistent Notification using RemoteViews ---
+    private fun dp(): Float = resources.displayMetrics.density
+
+    // ============================================================
+    //  Custom Vector Drawables (Canvas-drawn)
+    // ============================================================
+
+    private fun createPlayDrawable(color: Int, size: Int): android.graphics.drawable.Drawable {
+        return object : android.graphics.drawable.Drawable() {
+            override fun draw(canvas: android.graphics.Canvas) {
+                val cx = bounds.exactCenterX()
+                val cy = bounds.exactCenterY()
+                val s = Math.min(bounds.width(), bounds.height()) * 0.45f
+                val path = android.graphics.Path().apply {
+                    moveTo(cx - s * 0.35f, cy - s * 0.55f)
+                    lineTo(cx - s * 0.35f, cy + s * 0.55f)
+                    lineTo(cx + s * 0.6f, cy)
+                    close()
+                }
+                val p = android.graphics.Paint().apply {
+                    this.color = color
+                    isAntiAlias = true
+                    style = android.graphics.Paint.Style.FILL
+                }
+                canvas.drawPath(path, p)
+            }
+            override fun setAlpha(alpha: Int) {}
+            override fun setColorFilter(cf: android.graphics.ColorFilter?) {}
+            @Deprecated("Deprecated in Java")
+            override fun getOpacity(): Int = android.graphics.PixelFormat.TRANSLUCENT
+        }
+    }
+
+    private fun createPauseDrawable(color: Int, size: Int): android.graphics.drawable.Drawable {
+        return object : android.graphics.drawable.Drawable() {
+            override fun draw(canvas: android.graphics.Canvas) {
+                val cx = bounds.exactCenterX()
+                val cy = bounds.exactCenterY()
+                val s = Math.min(bounds.width(), bounds.height()) * 0.40f
+                val barW = s * 0.28f
+                val gap = s * 0.15f
+                val halfH = s * 0.5f
+                val p = android.graphics.Paint().apply {
+                    this.color = color
+                    isAntiAlias = true
+                    style = android.graphics.Paint.Style.FILL
+                }
+                val r = 2f
+                // Left bar
+                canvas.drawRoundRect(
+                    cx - barW - gap / 2f, cy - halfH,
+                    cx - gap / 2f, cy + halfH, r, r, p
+                )
+                // Right bar
+                canvas.drawRoundRect(
+                    cx + gap / 2f, cy - halfH,
+                    cx + barW + gap / 2f, cy + halfH, r, r, p
+                )
+            }
+            override fun setAlpha(alpha: Int) {}
+            override fun setColorFilter(cf: android.graphics.ColorFilter?) {}
+            @Deprecated("Deprecated in Java")
+            override fun getOpacity(): Int = android.graphics.PixelFormat.TRANSLUCENT
+        }
+    }
+
+    private fun createStopDrawable(color: Int, size: Int): android.graphics.drawable.Drawable {
+        return object : android.graphics.drawable.Drawable() {
+            override fun draw(canvas: android.graphics.Canvas) {
+                val cx = bounds.exactCenterX()
+                val cy = bounds.exactCenterY()
+                val s = Math.min(bounds.width(), bounds.height()) * 0.35f
+                val p = android.graphics.Paint().apply {
+                    this.color = color
+                    isAntiAlias = true
+                    style = android.graphics.Paint.Style.FILL
+                }
+                canvas.drawRoundRect(cx - s, cy - s, cx + s, cy + s, 3f, 3f, p)
+            }
+            override fun setAlpha(alpha: Int) {}
+            override fun setColorFilter(cf: android.graphics.ColorFilter?) {}
+            @Deprecated("Deprecated in Java")
+            override fun getOpacity(): Int = android.graphics.PixelFormat.TRANSLUCENT
+        }
+    }
+
+    private fun createMinimizeDrawable(color: Int, size: Int): android.graphics.drawable.Drawable {
+        return object : android.graphics.drawable.Drawable() {
+            override fun draw(canvas: android.graphics.Canvas) {
+                val cx = bounds.exactCenterX()
+                val cy = bounds.exactCenterY()
+                val w = Math.min(bounds.width(), bounds.height()) * 0.50f
+                val p = android.graphics.Paint().apply {
+                    this.color = color
+                    isAntiAlias = true
+                    strokeWidth = 2.5f
+                    style = android.graphics.Paint.Style.STROKE
+                    strokeCap = android.graphics.Paint.Cap.ROUND
+                }
+                canvas.drawLine(cx - w, cy, cx + w, cy, p)
+            }
+            override fun setAlpha(alpha: Int) {}
+            override fun setColorFilter(cf: android.graphics.ColorFilter?) {}
+            @Deprecated("Deprecated in Java")
+            override fun getOpacity(): Int = android.graphics.PixelFormat.TRANSLUCENT
+        }
+    }
+
+    private fun createExpandArrowDrawable(color: Int, size: Int): android.graphics.drawable.Drawable {
+        return object : android.graphics.drawable.Drawable() {
+            override fun draw(canvas: android.graphics.Canvas) {
+                val cx = bounds.exactCenterX()
+                val cy = bounds.exactCenterY()
+                val s = Math.min(bounds.width(), bounds.height()) * 0.35f
+                val p = android.graphics.Paint().apply {
+                    this.color = color
+                    isAntiAlias = true
+                    strokeWidth = 2.5f
+                    style = android.graphics.Paint.Style.STROKE
+                    strokeCap = android.graphics.Paint.Cap.ROUND
+                }
+                // ">" arrow pointing right
+                canvas.drawLine(cx - s * 0.3f, cy - s * 0.6f, cx + s * 0.5f, cy, p)
+                canvas.drawLine(cx - s * 0.3f, cy + s * 0.6f, cx + s * 0.5f, cy, p)
+            }
+            override fun setAlpha(alpha: Int) {}
+            override fun setColorFilter(cf: android.graphics.ColorFilter?) {}
+            @Deprecated("Deprecated in Java")
+            override fun getOpacity(): Int = android.graphics.PixelFormat.TRANSLUCENT
+        }
+    }
+
+    // --- Notification ---
     private fun createNotification(): Notification {
         val immutableFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
@@ -511,33 +655,27 @@ class PomodoroOverlayService : Service() {
             immutableFlag
         )
 
-        // Build custom notification layouts using RemoteViews
         val remoteViews = RemoteViews(packageName, R.layout.custom_pomodoro_notification)
         val bigRemoteViews = RemoteViews(packageName, R.layout.custom_pomodoro_notification_expanded)
 
-        // --- Update text fields: elapsedSeconds is the current forward-count value ---
         val hours = elapsedSeconds / 3600
         val minutes = (elapsedSeconds % 3600) / 60
         val seconds = elapsedSeconds % 60
         val timeStr = if (hours > 0) String.format("%02d:%02d:%02d", hours, minutes, seconds)
                       else String.format("%02d:%02d", minutes, seconds)
 
-        // Task title and status
         val statusText = if (isPaused) "PAUSED" else "FOCUSING"
         val displayTaskName = taskName
 
         remoteViews.setTextViewText(R.id.task_title, displayTaskName.uppercase())
         bigRemoteViews.setTextViewText(R.id.task_title, displayTaskName.uppercase())
-        
         try {
             bigRemoteViews.setTextViewText(resources.getIdentifier("status_text", "id", packageName), statusText)
         } catch (_: Exception) {}
 
-        // Timer text
         remoteViews.setTextViewText(R.id.timer_text, timeStr)
         bigRemoteViews.setTextViewText(R.id.timer_text, timeStr)
 
-        // Timer color based on state
         val timerColor = when {
             isPaused -> Color.parseColor("#FF9800")
             else -> Color.parseColor("#FF5722")
@@ -545,19 +683,16 @@ class PomodoroOverlayService : Service() {
         remoteViews.setTextColor(R.id.timer_text, timerColor)
         bigRemoteViews.setTextColor(R.id.timer_text, timerColor)
 
-        // --- Update icons based on play/pause state ---
         val playPauseIcon = if (isPaused) android.R.drawable.ic_media_play else android.R.drawable.ic_media_pause
         remoteViews.setImageViewResource(R.id.btn_play_pause, playPauseIcon)
         bigRemoteViews.setImageViewResource(R.id.btn_play_pause, playPauseIcon)
 
-        // --- Set click intents ---
         remoteViews.setOnClickPendingIntent(R.id.btn_play_pause, playPausePendingIntent)
         remoteViews.setOnClickPendingIntent(R.id.btn_stop, stopPendingIntent)
         bigRemoteViews.setOnClickPendingIntent(R.id.btn_play_pause, playPausePendingIntent)
         bigRemoteViews.setOnClickPendingIntent(R.id.btn_stop, stopPendingIntent)
 
-        // Use the app logo as the small icon in the notification bar
-        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
+        return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.notification_logo)
             .setContentIntent(contentIntent)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
@@ -566,8 +701,7 @@ class PomodoroOverlayService : Service() {
             .setCustomContentView(remoteViews)
             .setCustomBigContentView(bigRemoteViews)
             .setStyle(NotificationCompat.DecoratedCustomViewStyle())
-
-        return builder.build()
+            .build()
     }
 
     fun updateNotification() {
