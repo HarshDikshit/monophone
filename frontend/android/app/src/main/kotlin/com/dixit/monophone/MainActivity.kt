@@ -149,7 +149,7 @@ class MainActivity : FlutterActivity() {
                         if (service != null) {
                             service.taskName = taskName
                             // Refresh the overlay UI and notification to show the updated task name
-                            service.updateUI()
+                            service.updateExpandedUI()
                             service.updateNotification()
                             result.success(true)
                         } else {
