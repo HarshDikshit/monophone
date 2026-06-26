@@ -132,7 +132,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           mimeType: 'image/png',
           name: 'analytics.png',
         ),
-      ], text: 'My Study Analytics');
+      ], text: 'My Focus Analytics');
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

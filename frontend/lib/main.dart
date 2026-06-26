@@ -14,7 +14,16 @@ import 'services/offline_sync_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+
+  // Hide status bar on home screen & swipe panels (immersiveSticky lets users
+  // swipe down to temporarily reveal the status bar for notifications).
+  SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+
+  // Lock app to portrait mode regardless of device orientation
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+  ]);
 
   // Pre-load FocusTube blocker rules so the launcher can intercept blocked apps
   // immediately on first tap, without waiting for FocusTubeBlockerScreen to open.

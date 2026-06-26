@@ -15,7 +15,8 @@ class LauncherState extends ChangeNotifier {
 
   /// Global navigator key for showing dialogs from services without context.
   /// Set this in the MaterialApp constructor.
-  static final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+  static final GlobalKey<NavigatorState> navigatorKey =
+      GlobalKey<NavigatorState>();
 
   // Timer mode: 'countdown' or 'countup'
   String _timerMode = 'countdown';
@@ -87,7 +88,7 @@ class LauncherState extends ChangeNotifier {
 
   int get focusElapsedSeconds => _focusElapsedSeconds;
 
-  int get studySeconds => _studySeconds + _focusPendingSeconds;
+  int get studySeconds => _studySeconds + _focusElapsedSeconds;
 
   String get focusElapsedSecondsFormatted {
     final m = _focusElapsedSeconds ~/ 60;
@@ -196,27 +197,13 @@ class LauncherState extends ChangeNotifier {
 
           if (_isFocusActive && !_isPaused) {
             _checkMidnightReset();
-            _focusPendingSeconds += 1;
+            _focusPendingSeconds =
+                _focusElapsedSeconds; // track elapsed for commit on stop
             _focusDirty = true;
 
-            // Increment hourly bucket
+            // Increment hourly bucket for analytics daily total display
             final hour = DateTime.now().hour;
             _hourlyStudySeconds[hour] += 1;
-
-            // Real-time task attribution: immediately assign each second to the
-            // active task so that task.focusSeconds stays continuously updated.
-            // This ensures the day planner UI, analytics screen, and all task
-            // analytics reflect the focus time in realtime (every 1 second).
-            if (_activeTaskId != null) {
-              _attributeSecondsToTask(_activeTaskId, 1, persistToDisk: false);
-            }
-
-            // Periodic commit every 60 seconds to prevent data loss
-            _focusTickCounter++;
-            if (_focusTickCounter >= 60) {
-              _focusTickCounter = 0;
-              _commitFocusProgress(sync: true);
-            }
           }
           notifyListeners();
           break;
@@ -497,10 +484,10 @@ class LauncherState extends ChangeNotifier {
     _focusPendingSeconds = 0;
     _focusDirty = true;
 
-    // Seconds are already attributed to the task in real-time via onFocusTick.
-    // Just persist the planner data to disk.
+    // On stop: attribute the entire batch of elapsed seconds to the active task
+    // and to the analytics screen's task study seconds map.
     if (_activeTaskId != null && taskSeconds > 0) {
-      _plannerService?.persist();
+      _attributeSecondsToTask(_activeTaskId, taskSeconds, persistToDisk: true);
     }
 
     await _saveLocalStats();
@@ -661,9 +648,10 @@ class LauncherState extends ChangeNotifier {
         // Same day — add to today's stats
         if (_studyApps.contains(_lastLaunchedPackage)) {
           _studySeconds += elapsed;
-          _attributeSecondsToTask(_activeTaskId, elapsed);
 
-          // Bucketing for handleResume
+          // Hourly bucket only — the stop handler (_commitFocusProgress) will
+          // attribute the full session time to task + analytics at once.
+          // Do NOT double-attribute with _attributeSecondsToTask here.
           final hour = DateTime.now().hour;
           _hourlyStudySeconds[hour] += elapsed;
 
@@ -687,9 +675,15 @@ class LauncherState extends ChangeNotifier {
         } else if (_distractionApps.contains(_lastLaunchedPackage)) {
           _distractedSeconds += elapsed;
         } else {
+          // If focus is active, the time spent in other apps is still part of
+          // the total focus session duration. The stop handler will commit the
+          // full session time (focusElapsedSeconds) to task + analytics at once.
+          // Do NOT double-attribute here — let _commitFocusProgress handle it.
           if (_isFocusActive) {
             _studySeconds += elapsed;
-            _attributeSecondsToTask(_activeTaskId, elapsed);
+            // Hourly bucket still updated for today's total
+            final hour = DateTime.now().hour;
+            _hourlyStudySeconds[hour] += elapsed;
           }
         }
         await _saveLocalStats();
@@ -928,11 +922,11 @@ class LauncherState extends ChangeNotifier {
     // Demand battery unrestricted mode via a sweet, clear dialog.
     // The user must manually set it or explicitly choose to continue without it.
     final batteryOk = await BatteryOptimizationDialog.showIfNeeded();
-    
+
     if (!batteryOk) {
       // User chose "Continue anyway" - allow them to proceed
     }
-    
+
     await checkBatteryOptimizationStatus();
     if (!_isBatteryOptimizationIgnored) {
       _showBatteryPrompt = true;
@@ -1344,9 +1338,17 @@ class LauncherState extends ChangeNotifier {
     }
   }
 
-  void _attributeSecondsToTask(String? taskId, int seconds, {bool persistToDisk = true}) {
+  void _attributeSecondsToTask(
+    String? taskId,
+    int seconds, {
+    bool persistToDisk = true,
+  }) {
     if (taskId == null || seconds <= 0 || _plannerService == null) return;
-    _plannerService!.addFocusSeconds(taskId, seconds, persistToDisk: persistToDisk);
+    _plannerService!.addFocusSeconds(
+      taskId,
+      seconds,
+      persistToDisk: persistToDisk,
+    );
 
     // Also track for today's specific analytics record
     _taskStudySeconds[taskId] = (_taskStudySeconds[taskId] ?? 0) + seconds;
