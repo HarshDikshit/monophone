@@ -29,9 +29,6 @@ void main() async {
   // immediately on first tap, without waiting for FocusTubeBlockerScreen to open.
   await BlockerService.instance.load();
 
-  // Start offline sync service - periodically syncs queued data
-  OfflineSyncService.instance.startPeriodicSync();
-
   runApp(
     ChangeNotifierProvider(
       create: (_) => LauncherState(),

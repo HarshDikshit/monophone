@@ -446,6 +446,8 @@ class PomodoroOverlayService : Service() {
         isCollapsed = true
         expandedRoot.visibility = View.GONE
         collapsedRoot.visibility = View.VISIBLE
+        // Update collapsed tab background based on pause state
+        updateCollapsedBackground()
         // Snap to left edge
         params.x = 0
         overlayView?.let { windowManager.updateViewLayout(it, params) }
@@ -496,6 +498,32 @@ class PomodoroOverlayService : Service() {
             playPauseBtn.setImageDrawable(createPlayDrawable(Color.WHITE, (22 * dp()).toInt()))
         } else {
             playPauseBtn.setImageDrawable(createPauseDrawable(Color.WHITE, (22 * dp()).toInt()))
+        }
+        
+        // Change pill background: gray when paused, black when playing
+        val dp = resources.displayMetrics.density
+        val bgColor = if (isPaused) Color.parseColor("#FF555555") else Color.parseColor("#FF000000")
+        expandedRoot.background = createRoundedRectDrawable(
+            bgColor,
+            Color.parseColor("#3DFFFFFF"),
+            (1 * dp).toInt(),
+            (18 * dp)
+        )
+        
+        // Also update collapsed tab background when expanded UI is refreshed
+        updateCollapsedBackground()
+    }
+    
+    private fun updateCollapsedBackground() {
+        val dp = resources.displayMetrics.density
+        val bgColor = if (isPaused) Color.parseColor("#FF555555") else Color.parseColor("#FF000000")
+        collapsedRoot.background = createRoundedRectDrawable(
+            bgColor,
+            Color.parseColor("#3DFFFFFF"),
+            (1 * dp).toInt(),
+            (0 * dp)
+        ).apply {
+            cornerRadii = floatArrayOf(0f, 0f, (10 * dp), (10 * dp), (10 * dp), (10 * dp), 0f, 0f)
         }
     }
 

@@ -1766,13 +1766,6 @@ class _LauncherHomeState extends State<LauncherHome>
             }
           }
         },
-        onVerticalDragEnd: (details) {
-          final velocity = details.primaryVelocity ?? 0;
-          if (velocity < -300) {
-            // Swipe up (bottom to top) -> opens pomodoro timer
-            Navigator.pushNamed(context, '/pomodoro');
-          }
-        },
         child: Stack(
           children: [
             // Layer 1: Main Home Workspace

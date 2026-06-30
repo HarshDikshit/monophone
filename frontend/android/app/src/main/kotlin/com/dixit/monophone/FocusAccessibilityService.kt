@@ -184,6 +184,72 @@ class FocusAccessibilityService : AccessibilityService() {
         }
     }
 
+    private fun hasReelPlayerClass(node: AccessibilityNodeInfo?): Boolean {
+        if (node == null) return false
+        val className = node.className?.toString() ?: ""
+        if (className.contains("ReelPlayer", ignoreCase = true) || 
+            className.contains("ReelWatch", ignoreCase = true) ||
+            className.contains("reel.common", ignoreCase = true) ||
+            className.contains("ShortsPlayer", ignoreCase = true) ||
+            className.contains(".shorts.", ignoreCase = true) ||
+            className.contains("ShortsLayout", ignoreCase = true)) {
+            return true
+        }
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i)
+            if (child != null) {
+                if (hasReelPlayerClass(child)) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    private fun isShortsTabSelected(node: AccessibilityNodeInfo?): Boolean {
+        if (node == null) return false
+        val text = node.text?.toString() ?: ""
+        val desc = node.contentDescription?.toString() ?: ""
+        val className = node.className?.toString() ?: ""
+        
+        // Check 1: Strict match — text/description is exactly "Shorts" and selected
+        val isStrictShorts = text.equals("shorts", ignoreCase = true) || desc.equals("shorts", ignoreCase = true)
+        if (isStrictShorts && node.isSelected) {
+            return true
+        }
+        
+        // Check 2: Content description or text contains "shorts" (handles localized variants like "Shorts" in nav bar)
+        val isShortsText = text.contains("shorts", ignoreCase = true) || desc.contains("shorts", ignoreCase = true)
+        if (isShortsText && node.isSelected) {
+            return true
+        }
+        
+        // Check 3: This node is in a bottom navigation bar and a child with "shorts" text is selected
+        val isBottomNav = className.contains("BottomNavigation", ignoreCase = true) ||
+                          className.contains("TabBar", ignoreCase = true) ||
+                          className.contains("TabLayout", ignoreCase = true) ||
+                          (text.isEmpty() && desc.isEmpty() && node.childCount > 0)
+        
+        // Check 4: Package resource ID based detection for the Shorts tab
+        val viewId = try { node.viewIdResourceName?.toString() ?: "" } catch (_: Exception) { "" }
+        val isShortsTabResource = viewId.contains("shorts", ignoreCase = true) && 
+                                  (viewId.contains("tab", ignoreCase = true) || node.isSelected)
+        
+        if (isShortsTabResource) {
+            return true
+        }
+        
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i)
+            if (child != null) {
+                if (isShortsTabSelected(child)) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
     private fun checkIfInShortsFeed(packageName: String, event: AccessibilityEvent): Boolean {
         val root = rootInActiveWindow ?: event.source
         if (root != null) {
@@ -192,18 +258,50 @@ class FocusAccessibilityService : AccessibilityService() {
                 val allContent = nodes.joinToString("\n") { "${it.first} ${it.second}" }.lowercase(java.util.Locale.US)
                 
                 if (packageName.contains("youtube")) {
+                    // Check if Shorts Tab is active or Reel Player class is present
+                    val isShortsTabActive = isShortsTabSelected(root)
+                    val hasReelActive = hasReelPlayerClass(root)
+                    
                     // Signal 1: The official YouTube Shorts player view or specific unique vertical overlay buttons.
                     // The 'dislike' button + 'remix' or 'share' in the vertical player is a very strong signal.
                     // Shorts player buttons usually have content descriptions like "dislike this video", "remix this video".
                     val hasShortsButtons = allContent.contains("dislike") && (allContent.contains("remix") || allContent.contains("comments") || allContent.contains("share"))
                     
-                    // Signal 2: Check for markers of the classic Home/Subscriptions feed.
+                    // Signal 1b: The Shorts player has a unique vertical button layout on the right side.
+                    // In the Shorts feed, action buttons (like, comment, share, remix) appear vertically stacked.
+                    // This is distinguishable from horizontal button layouts in regular videos.
+                    val hasVerticalActions = allContent.contains("like") && 
+                                             allContent.contains("comment") && 
+                                             allContent.contains("share") &&
+                                             !allContent.contains("rotate")  // Exclude fullscreen rotation hints
+                    
+                    // Signal 2: Shorts player often shows "@channelname" in a distinct format
+                    val hasAtMention = allContent.contains("@") && 
+                                       allContent.contains("subscribe")
+                    
+                    // Signal 3: The Shorts player shows a "Shorts" header or title bar
+                    val hasShortsHeader = allContent.contains("shorts") && 
+                                          (allContent.contains("swipe") || allContent.contains("up"))
+                    
+                    // Combined strong Shorts signals
+                    val hasStrongShortsSignals = isShortsTabActive || 
+                                                  hasReelActive || 
+                                                  (hasShortsButtons && hasVerticalActions) ||
+                                                  (hasAtMention && hasVerticalActions) ||
+                                                  hasShortsHeader
+                    
+                    if (hasStrongShortsSignals) {
+                        return true
+                    }
+                    
+                    // Signal 4: Check for markers of the classic Home/Subscriptions feed.
                     // Regular videos show views, time ago, and channel names on screen together.
                     val viewsCount = allContent.split("views").size - 1
                     val agoCount = allContent.split("ago").size - 1
                     
                     // If we see more than one regular video markers, we are almost certainly on a scrolling list (Home/Sub).
-                    val hasRegularVideoMarkers = (viewsCount >= 1 || agoCount >= 1)
+                    // We raise the threshold to 2 to prevent a single regular video reference in background from triggering false negatives
+                    val hasRegularVideoMarkers = (viewsCount >= 2 || agoCount >= 2)
                     
                     // False positive prevention: If we see main navigation tabs and regular video markers.
                     if (hasRegularVideoMarkers && (allContent.contains("home") || allContent.contains("subscriptions"))) {
@@ -211,8 +309,15 @@ class FocusAccessibilityService : AccessibilityService() {
                         return false
                     }
                     
-                    // Additional check: Shorts player is usually full screen, so we won't see view counts for NEXT/PREVIOUS videos in the scan.
-                    return hasShortsButtons && !hasRegularVideoMarkers
+                    // Fallback: If no strong Shorts signals AND no regular video markers,
+                    // check if hasShortsButtons alone is a sufficient signal (without regular video markers)
+                    if (hasShortsButtons && !hasRegularVideoMarkers) {
+                        return true
+                    }
+                    
+                    // Final fallback: If we have vertical actions AND no regular video markers,
+                    // this is likely a Shorts feed (regular feed has horizontal layout)
+                    return hasVerticalActions && !hasRegularVideoMarkers
                 }
                 
                 if (packageName.contains("instagram")) {

@@ -462,6 +462,19 @@ class LauncherState extends ChangeNotifier {
     _studySeconds += _focusPendingSeconds;
     final taskSeconds = _focusPendingSeconds;
 
+    // Determine the session title: use the selected task's title when available
+    String sessionTitle = _lastGoal.isNotEmpty ? _lastGoal : "Focus Session";
+    if (_activeTaskId != null && _plannerService != null) {
+      try {
+        final activeTitle = _plannerService!.tasks
+            .firstWhere((t) => t.id == _activeTaskId)
+            .title;
+        if (activeTitle.isNotEmpty) {
+          sessionTitle = activeTitle;
+        }
+      } catch (_) {}
+    }
+
     if (_currentSessionStart != null && taskSeconds > 0) {
       final now = DateTime.now();
       _focusSessions.add({
@@ -469,7 +482,7 @@ class LauncherState extends ChangeNotifier {
         'endTime': now.toIso8601String(),
         'actualSeconds': taskSeconds,
         'taskId': _activeTaskId,
-        'title': _lastGoal,
+        'title': sessionTitle,
       });
 
       if (_isFocusActive) {
@@ -792,6 +805,9 @@ class LauncherState extends ChangeNotifier {
           await updateAIHeadline();
           _lastProfileFetch = _lastSyncTime;
         }
+
+        // After a successful sync, drain any offline-queued data
+        await OfflineSyncService.instance.processQueue();
       } catch (e) {
         debugPrint("Failed to sync stats to backend: $e");
         await OfflineSyncService.instance.queueActivitySync(
@@ -933,8 +949,22 @@ class LauncherState extends ChangeNotifier {
     _focusPendingSeconds = 0;
     _focusDirty = false;
 
+    // Determine the correct task name: use the selected task's title when available,
+    // fall back to _lastGoal (overall life goal) or a sensible default.
+    String taskNameToUse = _lastGoal.isNotEmpty ? _lastGoal : "Focus Session";
+    if (_activeTaskId != null && _plannerService != null) {
+      try {
+        final activeTitle = _plannerService!.tasks
+            .firstWhere((t) => t.id == _activeTaskId)
+            .title;
+        if (activeTitle.isNotEmpty) {
+          taskNameToUse = activeTitle;
+        }
+      } catch (_) {}
+    }
+
     await _channel.invokeMethod('startFocusTimer', {
-      'taskName': _lastGoal.isNotEmpty ? _lastGoal : "Focus Session",
+      'taskName': taskNameToUse,
       'taskId': _activeTaskId,
       'soundEnabled': _soundEnabled,
       'vibrationEnabled': _vibrationEnabled,
@@ -945,7 +975,14 @@ class LauncherState extends ChangeNotifier {
     notifyListeners();
   }
 
-  void stopFocusTimer({bool manual = false}) async {
+  Future<void> stopFocusTimer({bool manual = false}) async {
+    // Capture full elapsed time BEFORE stopping the native timer,
+    // because onFocusStateChanged may fire during invokeMethod
+    // and call _commitFocusProgress with stale _focusPendingSeconds.
+    if (_focusElapsedSeconds > _focusPendingSeconds) {
+      _focusPendingSeconds = _focusElapsedSeconds;
+    }
+
     _isFocusActive = false;
     _isPaused = false;
     _isManuallyStopped = manual;

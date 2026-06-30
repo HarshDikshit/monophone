@@ -940,17 +940,18 @@ class _TaskBlockState extends State<_TaskBlock> {
               height: double.infinity,
               decoration: BoxDecoration(
                 color: widget.task.isCompleted
-                    ? Colors.green.withOpacity(0.08)
-                    : Colors.amber.withOpacity(0.08),
-                border: Border(
-                  left: BorderSide(
-                    color: widget.isActive
-                        ? Colors.white
-                        : (widget.task.isCompleted
-                              ? Colors.green.withOpacity(0.6)
-                              : Colors.amber.withOpacity(0.6)),
-                    width: widget.isActive ? 3 : 2,
-                  ),
+                    ? Colors.green.withOpacity(0.06)
+                    : (widget.isActive
+                        ? Colors.white.withOpacity(0.06)
+                        : Colors.white.withOpacity(0.025)),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: widget.isActive
+                      ? Colors.white.withOpacity(0.3)
+                      : (widget.task.isCompleted
+                          ? Colors.green.withOpacity(0.3)
+                          : Colors.white.withOpacity(0.08)),
+                  width: widget.isActive ? 2 : 1,
                 ),
               ),
               child: Consumer<LauncherState>(
@@ -974,9 +975,14 @@ class _TaskBlockState extends State<_TaskBlock> {
                           heightFactor: focusRatio,
                           child: Container(
                             decoration: BoxDecoration(
-                              color: widget.task.isCompleted
-                                  ? Colors.green.withOpacity(0.15)
-                                  : Colors.amber.withOpacity(0.12),
+                              borderRadius: BorderRadius.circular(8),
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: widget.task.isCompleted
+                                    ? [Colors.green.withOpacity(0.10), Colors.green.withOpacity(0.22)]
+                                    : [Colors.amber.withOpacity(0.06), Colors.amber.withOpacity(0.18)],
+                              ),
                             ),
                           ),
                         ),
@@ -1051,14 +1057,27 @@ class _TaskBlockState extends State<_TaskBlock> {
                                     ),
                                   ),
                                 const SizedBox(width: 6),
-                                // Play button
+                                // Play/Stop button (mutually exclusive – only one shown at a time)
                                 GestureDetector(
-                                  onTap: () {
-                                    state.switchActiveTask(
-                                      widget.task.id,
-                                      taskName: widget.task.title,
-                                    );
-                                    if (!state.isFocusActive) {
+                                  onTap: () async {
+                                    if (isThisTaskActive && state.isFocusActive) {
+                                      // This task is running → stop it
+                                      await state.stopFocusTimer(manual: true);
+                                      state.setActiveTask(null);
+                                    } else if (state.isFocusActive) {
+                                      // Focus running on a different task → stop it, switch, start fresh
+                                      await state.stopFocusTimer(manual: true);
+                                      state.switchActiveTask(
+                                        widget.task.id,
+                                        taskName: widget.task.title,
+                                      );
+                                      state.startFocusTimer();
+                                    } else {
+                                      // No focus running → switch and start
+                                      state.switchActiveTask(
+                                        widget.task.id,
+                                        taskName: widget.task.title,
+                                      );
                                       state.startFocusTimer();
                                     }
                                   },
@@ -1067,44 +1086,24 @@ class _TaskBlockState extends State<_TaskBlock> {
                                     height: 28,
                                     decoration: BoxDecoration(
                                       color: isRunning
-                                          ? Colors.white.withOpacity(0.1)
-                                          : Colors.transparent,
+                                          ? Colors.redAccent.withOpacity(0.15)
+                                          : Colors.greenAccent.withOpacity(0.15),
+                                      borderRadius: BorderRadius.circular(6),
                                       border: Border.all(
                                         color: isRunning
-                                            ? Colors.white38
-                                            : Colors.white12,
+                                            ? Colors.redAccent.withOpacity(0.6)
+                                            : Colors.greenAccent.withOpacity(0.6),
                                       ),
                                     ),
                                     child: Icon(
-                                      Icons.play_arrow,
+                                      isRunning ? Icons.stop : Icons.play_arrow,
                                       color: isRunning
-                                          ? Colors.white
+                                          ? Colors.redAccent
                                           : Colors.greenAccent,
                                       size: 16,
                                     ),
                                   ),
                                 ),
-                                if (isRunning) ...[
-                                  const SizedBox(width: 4),
-                                  GestureDetector(
-                                    onTap: () {
-                                      state.stopFocusTimer(manual: true);
-                                      state.switchActiveTask(null);
-                                    },
-                                    child: Container(
-                                      width: 28,
-                                      height: 28,
-                                      decoration: BoxDecoration(
-                                        color: Colors.red.withOpacity(0.1),
-                                      ),
-                                      child: const Icon(
-                                        Icons.stop,
-                                        color: Colors.redAccent,
-                                        size: 14,
-                                      ),
-                                    ),
-                                  ),
-                                ],
                               ],
                             ),
                             const SizedBox(height: 4),

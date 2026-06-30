@@ -68,9 +68,7 @@ if (REDIS_URL) {
     isRedisConnected = false;
   }
 } else {
-  console.log(
-    "REDIS_URL not configured. Using in-memory cache fallback.",
-  );
+  // In development, in-memory cache is used. For production, set REDIS_URL.
 }
 
 // In-memory fallback cache

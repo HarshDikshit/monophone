@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
 import '../services/launcher_state.dart';
 import '../services/auth_guard.dart';
@@ -160,11 +162,40 @@ class _GroupsDashboardScreenState extends State<_GroupsDashboardScreen> {
   // Stub data
   List<GroupModel> _myGroups = [];
   bool _isLoading = true;
+  static const _cacheKey = 'social_groups_cache';
 
   @override
   void initState() {
     super.initState();
-    _fetchGroups();
+    _loadCachedThenFetch();
+  }
+
+  Future<void> _loadCachedThenFetch() async {
+    // Load cached data first for instant display
+    final prefs = await SharedPreferences.getInstance();
+    final cached = prefs.getString(_cacheKey);
+    if (cached != null) {
+      try {
+        final groupsData = List<dynamic>.from(jsonDecode(cached));
+        final groups = groupsData.map((g) => GroupModel(
+          id: g['_id'] ?? g['id'] ?? '',
+          name: g['name'] ?? 'Unnamed Group',
+          description: g['description'] ?? '',
+          category: g['category'] ?? 'General',
+          memberCount: g['memberCount'] ?? 0,
+          lastActivitySnippet: '',
+          isJoined: true,
+        )).toList();
+        if (mounted) {
+          setState(() {
+            _myGroups = groups;
+            _isLoading = false;
+          });
+        }
+      } catch (_) {}
+    }
+    // Then fetch fresh data
+    await _fetchGroups();
   }
 
   Future<void> _fetchGroups() async {
@@ -182,6 +213,10 @@ class _GroupsDashboardScreenState extends State<_GroupsDashboardScreen> {
           isJoined: true, // They are in this list because it's "my groups"
         );
       }).toList();
+
+      // Cache the fresh data
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_cacheKey, jsonEncode(groupsData));
 
       if (mounted) {
         setState(() {

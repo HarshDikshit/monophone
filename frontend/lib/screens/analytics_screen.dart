@@ -44,6 +44,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   final int _offset = 0; // navigation offset (0 = most recent period)
   Map<String, dynamic>? _analytics;
   bool _loading = true;
+  bool _isOffline = false;
   String? _error;
   final _shareKey = GlobalKey();
   Timer? _refreshTimer;
@@ -149,6 +150,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     setState(() {
       _loading = true;
       _error = null;
+      _isOffline = false;
     });
     try {
       final state = context.read<LauncherState>();
@@ -163,15 +165,25 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       );
       if (!mounted) return;
       setState(() {
+        _isOffline = data['_offline'] == true;
         _analytics = data;
         _loading = false;
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = e.toString().replaceAll('Exception: ', '');
-        _loading = false;
-      });
+      // On failure, keep showing cached data if we have it, with offline indicator
+      if (_analytics != null) {
+        setState(() {
+          _isOffline = true;
+          _error = null;
+          _loading = false;
+        });
+      } else {
+        setState(() {
+          _error = e.toString().replaceAll('Exception: ', '');
+          _loading = false;
+        });
+      }
     }
   }
 
@@ -397,6 +409,31 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                 child: ListView(
                   padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
                   children: [
+                    if (_isOffline)
+                      Container(
+                        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
+                        margin: const EdgeInsets.only(bottom: 8),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: _dim.withOpacity(0.4)),
+                          color: _card,
+                        ),
+                        child: const Row(
+                          children: [
+                            Icon(Icons.cloud_off, color: _dim, size: 12),
+                            SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                'No internet connection. Showing cached data.',
+                                style: TextStyle(
+                                  color: _dim,
+                                  fontSize: 8,
+                                  fontFamily: 'monospace',
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     RepaintBoundary(
                       key: _shareKey,
                       child: Column(
